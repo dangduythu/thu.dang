@@ -1,0 +1,33 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+const source=readFileSync(new URL('../ExerciseBank.js',import.meta.url),'utf8');
+const {BANK_GROUPS,EXERCISE_BANK,chooseExercises,groupStats}=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
+const allocation={numbers:120,add:120,multiply:160,quick:120,fractions:120,geometry:100,units:80,word:100,patterns:80};
+assert.equal(EXERCISE_BANK.length,1000);
+assert.equal(BANK_GROUPS.length,9);
+for(const group of BANK_GROUPS){
+  assert.equal(group.count,allocation[group.id]);
+  assert.equal(EXERCISE_BANK.filter(q=>q.groupId===group.id).length,group.count);
+}
+assert.equal(new Set(EXERCISE_BANK.map(q=>q.id)).size,1000);
+assert.equal(new Set(EXERCISE_BANK.map(q=>q.question)).size,1000);
+assert.ok(EXERCISE_BANK.every(q=>Number.isInteger(q.answer)&&q.answer>=0&&q.question&&q.explanation&&q.skill&&q.topic));
+const by=(id,n)=>EXERCISE_BANK.find(q=>q.id==='mk83-'+id+'-'+String(n).padStart(3,'0'));
+assert.equal(by('quick',1).answer,140);
+assert.equal(by('quick',3).answer,46*(14+7));
+assert.equal(by('add',1).answer,2304+502);
+assert.equal(by('multiply',2).answer,27);
+assert.equal(by('fractions',1).answer,2);
+assert.equal(by('geometry',1).answer,2*(5+3));
+assert.equal(by('units',1).answer,300);
+assert.equal(by('word',1).answer,140-18-11);
+assert.equal(by('patterns',1).answer,2+4*2);
+const mixed=chooseExercises('all','Tất cả',10,[]);
+assert.equal(mixed.length,10);
+assert.equal(new Set(mixed.map(q=>q.groupId)).size,9);
+assert.equal(chooseExercises('quick','Khá',20,[]).length,20);
+const completed={answers:[{id:by('numbers',1).id,correct:true},{id:by('numbers',2).id,correct:false}]};
+assert.equal(groupStats([completed]).find(g=>g.id==='numbers').done,1);
+assert.ok(!chooseExercises('numbers','Tất cả',10,[completed]).some(q=>q.id===by('numbers',1).id));
+assert.ok(chooseExercises('numbers','Tất cả',10,[completed]).some(q=>q.id===by('numbers',2).id));
+console.log('PASS: 1000 unique questions, 9 groups, solutions, mixed selection, mastery and retry');
