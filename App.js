@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator, Alert, Animated, Easing, Keyboard, KeyboardAvoidingView, PanResponder, Platform, Pressable, SafeAreaView,
+  ActivityIndicator, Alert, Animated, BackHandler, Easing, Keyboard, KeyboardAvoidingView, PanResponder, Platform, Pressable, SafeAreaView,
   ScrollView, Share, StatusBar, StyleSheet, Text, TextInput, View, useWindowDimensions,
 } from 'react-native';
 import Svg, { Circle, Defs, Ellipse, G, LinearGradient, Path, Polygon, Rect, Stop, Text as SvgText } from 'react-native-svg';
@@ -10,6 +10,8 @@ import {CURRICULUM, curriculumFor, getLesson, getNextLesson, BOOK_TOPIC_ORDER} f
 import {makeLessonCheck, evaluateLearning, recommendLearning} from './LearningEngine';
 import {recentMistakes, topicTrends, dailyReviewPlan} from './PersonalizedPractice';
 import {PROGRESS_KEY, PRE_RESTORE_KEY, normalizeProgress, makeBackup, parseBackup, progressSummary} from './ProgressStorage';
+import {backDestination} from './Navigation';
+import {STAR_REWARDS, availableStars, getReward, purchaseReward, equipReward} from './StarShop';
 
 const SAVE_KEY = PROGRESS_KEY; // Giữ chính xác khóa V5–V7.5 để đọc lịch sử cũ.
 const BOOKS = [
@@ -21,7 +23,7 @@ const BOOKS = [
 // Bản alpha: lựa chọn bộ sách là tùy chọn hồ sơ, CHƯA phải ma trận đề được duyệt theo SGK.
 
 const GREEN = '#168451';
-const APP_VERSION = 'V8.0 RC · Android Offline';
+const APP_VERSION = 'V8.1 Preview · Star Shop';
 const TOPICS = [
   { id: 'numbers', title: 'Số tự nhiên', icon: '🔢', color: '#e6f4ea', description: 'Hàng, lớp, so sánh và làm tròn số', lessons: [
     ['Hàng và lớp', 'Trong số 36 425, chữ số 6 ở hàng nghìn nên có giá trị 6 000.', '36 425 = 30 000 + 6 000 + 400 + 20 + 5.'],
@@ -67,7 +69,7 @@ const TOPICS = [
 const randomInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 const formatNum = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 const normalize = (s) => String(s).replace(/[\s.,]/g, '').trim();
-const emptyProgress = () => ({ history: [], seen: [], stars: 0, badges: [], stages: {}, lessonsDone: [], currentLesson: null, lessonChecks: {} });
+const emptyProgress = () => ({ history: [], seen: [], stars: 0, badges: [], stages: {}, lessonsDone: [], currentLesson: null, lessonChecks: {}, starSpent:0, ownedRewards:[], equippedReward:null });
 const WORLDS = [{id:'numbers',name:'Rừng Số Học',icon:'🌳'},{id:'fractions',name:'Đảo Phân Số',icon:'🏝️'},{id:'geometry',name:'Thành Phố Hình Học',icon:'🏙️'},{id:'patterns',name:'Núi Trí Tuệ',icon:'⛰️'},{id:'word',name:'Lâu Đài Toán Học',icon:'🏰'}];
 const EXAM_TOPICS = ['numbers','add','multiply','divide','fractions','geometry','units','word','patterns'];
 const gcd = (a,b) => b ? gcd(b,a%b) : a;
@@ -477,13 +479,14 @@ const compactStyles=StyleSheet.create({
   explanation:{borderRadius:14,padding:12,gap:5},
   hint:{backgroundColor:'#f0f7f0',borderRadius:12,padding:10,gap:5},
 });
-function CompactShell({title,back,onBack,meta,children,actionLabel,onAction,actionDisabled=false,extraAction}){
+function CompactShell({title,back,onBack,onHome,meta,children,actionLabel,onAction,actionDisabled=false,extraAction}){
   return <SafeAreaView style={styles.root}><StatusBar barStyle="dark-content" backgroundColor="#f7faf8" translucent={Platform.OS==='android'}/>
     <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':undefined}>
       <View style={compactStyles.root}>
         <View style={compactStyles.top}><View style={compactStyles.topRow}>
           <Pressable onPress={()=>{Keyboard.dismiss();onBack();}} style={compactStyles.back} accessibilityRole="button" accessibilityLabel="Quay lại"><Text style={compactStyles.backText}>‹</Text></Pressable>
           <Text style={compactStyles.title} numberOfLines={1}>{title}</Text>{meta||null}
+          {onHome&&<Pressable onPress={()=>{Keyboard.dismiss();onHome();}} style={compactStyles.back} accessibilityRole="button" accessibilityLabel="Về Menu"><Text style={{fontSize:23,color:'#176b4b'}}>⌂</Text></Pressable>}
         </View></View>
         <ScrollView style={compactStyles.body} contentContainerStyle={compactStyles.bodyContent} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
           {children}
@@ -517,6 +520,8 @@ export default function App() {
   const [progress, setProgress] = useState(emptyProgress());
   const [ready, setReady] = useState(false);
   const [screen, setScreen] = useState('home');
+  const [shopMessage,setShopMessage] = useState('');
+  const shopSaving = useRef(false);
   const [topic, setTopic] = useState('add');
   const [level, setLevel] = useState('Khá');
   const [lessonIndex, setLessonIndex] = useState(0);
@@ -561,6 +566,20 @@ export default function App() {
   const [wordInputs,setWordInputs]=useState(['','','']);
   const [wordDone,setWordDone]=useState(false);
   const [wordPoints,setWordPoints]=useState(0);
+
+  useEffect(() => {
+    if(Platform.OS!=='android')return undefined;
+    const listener=BackHandler.addEventListener('hardwareBackPress',()=>{
+      Keyboard.dismiss();
+      const destination=backDestination(screen,mode);
+      if(destination){setScreen(destination);return true;}
+      Alert.alert('Thoát MathKid 4?', 'Con muốn về màn hình điện thoại?',[
+        {text:'Ở lại học',style:'cancel'},
+        {text:'Thoát ứng dụng',onPress:()=>BackHandler.exitApp()}]);
+      return true;
+    });
+    return ()=>listener.remove();
+  },[screen,mode]);
 
   useEffect(() => {
     if(screen!=='shark'||sharkOutcome!==null)return undefined;
@@ -789,14 +808,14 @@ export default function App() {
     }catch(e){Alert.alert('Không thể đọc bản dự phòng',String(e.message||e));}
   }
   function header(title, back = 'home') {
-    return <View style={styles.header}><Pressable onPress={() => setScreen(back)} style={styles.back}><Text style={styles.backText}>‹</Text></Pressable><Text style={styles.headerText}>{title}</Text><View style={{ width: 34 }} /></View>;
+    return <View style={styles.header}><Pressable onPress={() => setScreen(back)} style={styles.back}><Text style={styles.backText}>‹</Text></Pressable><Text style={styles.headerText}>{title}</Text><Pressable onPress={()=>{Keyboard.dismiss();setScreen('home');}} style={styles.back} accessibilityRole="button" accessibilityLabel="Về Menu"><Text style={{fontSize:22,color:'#226948'}}>⌂</Text></Pressable></View>;
   }
 
 
   // Fixed-bottom layouts: these screens intentionally bypass the old page-wide ScrollView.
   if(ready && screen==='shark' && sharkQ[sharkIndex]){
     const item=sharkQ[sharkIndex];
-    return <CompactShell title="Cá mập đuổi thuyền" onBack={()=>setScreen('home')}
+    return <CompactShell title="Cá mập đuổi thuyền" onBack={()=>setScreen('home')} onHome={()=>setScreen('home')}
       meta={<View style={[styles.timerPill,{paddingVertical:5,paddingHorizontal:10,minWidth:56},sharkTime<=10&&{backgroundColor:'#ffded1'}]}><Text style={[styles.timerText,{fontSize:17},sharkTime<=10&&{color:'#a93a23'}]}>{sharkTime}s</Text></View>}
       actionLabel={sharkOutcome===null?'Kiểm tra đáp án':sharkIndex+1===sharkQ.length?'Xem kết quả →':'Đi tiếp →'}
       actionDisabled={sharkOutcome===null&&!normalize(sharkInput)} onAction={sharkOutcome===null?checkShark:nextShark}>
@@ -810,7 +829,7 @@ export default function App() {
     </CompactShell>;
   }
   if(ready && screen==='quiz' && q){
-    return <CompactShell title={mode==='game'?'Vượt ải':mode==='test'?'Kiểm tra':mode==='review'?'Ôn câu từng sai':'Luyện tập'} onBack={()=>setScreen('home')}
+    return <CompactShell title={mode==='game'?'Vượt ải':mode==='test'?'Kiểm tra':mode==='review'?'Ôn câu từng sai':'Luyện tập'} onBack={()=>setScreen('home')} onHome={()=>setScreen('home')}
       meta={<Text style={styles.progressText}>{index+1}/{questions.length}</Text>}
       actionLabel={!checked?(mode==='test'?'Ghi nhận câu trả lời':'Kiểm tra đáp án'):(index+1===questions.length?'Xem kết quả →':'Câu tiếp theo →')}
       actionDisabled={!checked&&!normalize(input)} onAction={checked?nextQuestion:checkAnswer}>
@@ -825,7 +844,7 @@ export default function App() {
     </CompactShell>;
   }
   if(ready && screen==='wordSteps' && wordTask){
-    return <CompactShell title="Giải toán 3 bước" onBack={()=>setScreen('home')} meta={<Text style={styles.progressText}>{wordDone?`${wordPoints}/10`:'3 bước'}</Text>}
+    return <CompactShell title="Giải toán 3 bước" onBack={()=>setScreen('home')} onHome={()=>setScreen('home')} meta={<Text style={styles.progressText}>{wordDone?`${wordPoints}/10`:'3 bước'}</Text>}
       actionLabel={wordDone?'Làm bài mới':'Chấm bài'} actionDisabled={!wordDone&&wordInputs.some(v=>!normalize(v))} onAction={wordDone?startWord:gradeWord}>
       <View style={compactStyles.compactCard}><Text style={compactStyles.smallLabel}>BÀI TOÁN CỬA HÀNG GẠO</Text><Text style={styles.paragraph}>Cửa hàng có {wordTask.stock} kg gạo. Sáng bán {wordTask.morning} kg, chiều bán {wordTask.afternoon} kg. Số gạo còn lại chia đều vào các túi 4 kg. Hỏi được bao nhiêu túi?</Text></View>
       {['Tổng số gạo đã bán (kg) · 3 điểm','Số gạo còn lại (kg) · 3 điểm','Số túi 4 kg · 4 điểm'].map((label,i)=><View key={i} style={compactStyles.compactCard}><Text style={styles.rowTitle}>Bước {i+1}: {label}</Text><TextInput style={compactStyles.input} keyboardType="number-pad" value={wordInputs[i]} onChangeText={s=>setWordInputs(old=>old.map((v,j)=>j===i?s:v))} editable={!wordDone} placeholder="Nhập kết quả"/>{wordDone&&<Text style={styles.paragraph}>{normalize(wordInputs[i])===String([wordTask.sold,wordTask.left,wordTask.bags][i])?'Đúng':'Chưa đúng'} · Đáp án: {formatNum([wordTask.sold,wordTask.left,wordTask.bags][i])}</Text>}</View>)}
