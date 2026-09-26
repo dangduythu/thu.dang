@@ -10,7 +10,7 @@
     "check": "expo install --check",
     "test": "node --test",
     "build:web": "expo export --platform web --output-dir dist",
-    "desktop:dev": "npm run build:web && electron .",
+    "desktop:dev": "npm run build:web && electron desktop/main.cjs",
     "desktop:package": "npm run build:web && electron-builder --win portable --publish never"
   },
   "dependencies": {
