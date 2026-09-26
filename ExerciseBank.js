@@ -47,7 +47,7 @@ function make(group,n){
       if(t===4)return exercise(`Tính ${x} × (${y} + ${z}).`,x*(y+z),`${x} × ${y} + ${x} × ${z} = ${x*(y+z)}.`,'Phân phối');
       if(t===5)return exercise(`Tính (${x*y} + ${z*y}) : ${y}.`,x+z,`(${x} + ${z}) × ${y} : ${y} = ${x+z}.`,'Biểu thức');
       if(t===6)return exercise(`Chia ${x*y+z} cho ${y}, số dư là bao nhiêu?`,z%y,`${x*y+z} = ${Math.floor((x*y+z)/y)} × ${y} + ${z%y}.`,'Chia có dư');
-      return exercise(`Tính ${x} × ${y} − ${x} × ${z}.`,x*(y-z),`Đặt ${x} làm thừa số chung: ${x} × (${y} − ${z}) = ${x*(y-z)}.`,'Phân phối');
+      return exercise(`Tính ${x} × ${Math.max(y,z)} − ${x} × ${Math.min(y,z)}.`,x*Math.abs(y-z),`Đặt ${x} làm thừa số chung: ${x} × (${Math.max(y,z)} − ${Math.min(y,z)}) = ${x*Math.abs(y-z)}.`,'Phân phối');
     }
     case 'quick':{
       const x=40+n*3,y=12+n%11,z=5+n%7;
