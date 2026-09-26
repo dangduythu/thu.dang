@@ -135,8 +135,8 @@ export function chooseExercises(groupId,level='Tất cả',count=10,history=[]){
   const seen=new Set((Array.isArray(history)?history:[]).flatMap(h=>h.answers||[]).filter(a=>a?.correct).map(a=>a.id));
   const matching=EXERCISE_BANK.filter(q=>(groupId==='all'||q.groupId===groupId)&&(level==='Tất cả'||q.level===level));
   const pending=matching.filter(q=>!seen.has(q.id));
-  // Repeat completed questions only when the chosen pool has been fully mastered.
-  const pool=pending.length?pending:matching;
+  // Prefer unfinished questions; top up a short set from solved questions for a complete session.
+  const pool=[...pending,...matching.filter(q=>seen.has(q.id))];
   const target=Math.max(1,Math.min(20,Math.floor(count)||10));
   if(groupId!=='all')return pool.slice(0,target);
   const sections=BANK_GROUPS.map(g=>pool.filter(q=>q.groupId===g.id));
