@@ -767,6 +767,32 @@ export default function App() {
     await save(patch);
     setLessonCheckResult(correct?'correct':'wrong');
   }
+  async function persistShop(next, message){
+    if(shopSaving.current)return;
+    shopSaving.current=true;
+    try {
+      const normalized=normalizeProgress({...next,book:next.book||book});
+      await AsyncStorage.setItem(SAVE_KEY,JSON.stringify(normalized));
+      setProgress(normalized);
+      setShopMessage(message);
+    }catch(e){Alert.alert('Chưa lưu được phần thưởng','Vui lòng thử lại; sao và vật phẩm chưa bị thay đổi.');}
+    finally{shopSaving.current=false;}
+  }
+  async function buyReward(id){
+    if(shopSaving.current)return;
+    const outcome=purchaseReward(progress,id);
+    if(!outcome.ok){
+      setShopMessage(outcome.reason==='insufficient'?'Con chưa đủ sao. Hãy hoàn thành thêm thử thách!':outcome.reason==='owned'?'Con đã sở hữu phần thưởng này.':'Không tìm thấy phần thưởng.');
+      return;
+    }
+    await persistShop(outcome.progress,'Đã đổi '+outcome.reward.title+'! Con có thể dùng ngay trên trang chủ.');
+  }
+  async function wearReward(id){
+    if(shopSaving.current)return;
+    const outcome=equipReward(progress,id);
+    if(!outcome.ok)return;
+    await persistShop(outcome.progress,'Đã chọn '+getReward(id).title+' làm người bạn đồng hành!');
+  }
   function generateBackup(){
     const payload=makeBackup(progress,book);
     setBackupText(JSON.stringify(payload,null,2));
@@ -859,8 +885,9 @@ export default function App() {
   return <SafeAreaView style={styles.root}><StatusBar barStyle="dark-content" backgroundColor="#f7faf8" /><ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.page,Platform.OS==='android'&&{paddingTop:(StatusBar.currentHeight||24)+12}]}>
     {screen === 'home' && <>
       <Text style={styles.brand}>🌟 MathKid 4 · {APP_VERSION}</Text><Text style={styles.muted}>Mỗi ngày một chút – Giỏi Toán từng bước</Text>
-      <View style={styles.hero}><Text style={styles.heroTitle}>Chào nhà toán học nhí! 👋</Text><Text style={styles.heroText}>Sẵn sàng chinh phục thử thách hôm nay?</Text><Text style={styles.heroStars}>⭐ {progress.stars} ngôi sao  ·  ✅ {totalAnswered} câu đã làm</Text></View>
+      <View style={styles.hero}><Text style={styles.heroTitle}>{getReward(progress.equippedReward)?.icon||'🌟'} Chào nhà toán học nhí! 👋</Text><Text style={styles.heroText}>Sẵn sàng chinh phục thử thách hôm nay?</Text><Text style={styles.heroStars}>⭐ {availableStars(progress)} sao để đổi quà · 🏅 {progress.stars} sao đã kiếm · ✅ {totalAnswered} câu</Text></View>
       <View style={styles.grid}>
+        <Tile icon="🎁" title="Cửa hàng ngôi sao" subtitle={availableStars(progress)+' sao · Đổi bạn đồng hành'} color="#fff0c7" onPress={()=>{setShopMessage('');setScreen('shop');}} />
         <Tile icon="📚" title="Học bài" subtitle="Kiến thức và ví dụ" color="#e6f4ea" onPress={() => setScreen('topics')} />
         <Tile icon="🧠" title="Ôn tập cá nhân hóa" subtitle="Sửa lỗi sai và xem tiến bộ" color="#f0eafd" onPress={() => setScreen("reviewPlan")} />
         <Tile icon="🧭" title="Gia sư offline" subtitle="Gợi ý theo kết quả thực tế" color="#e8f5ee" onPress={() => setScreen("coach")} />
@@ -880,6 +907,27 @@ export default function App() {
       <Text style={styles.footnote}>Bài học, trò chơi và kết quả được xử lý trên thiết bị. APK cần được đóng gói và thử nghiệm offline; Expo Snack cần mạng để tải ban đầu.</Text>
     </>}
 
+    {screen === 'shop' && <>{header('Cửa hàng ngôi sao')}
+      <View style={[styles.hero,{backgroundColor:'#fff1cc'}]}>
+        <Text style={styles.heroTitle}>🎁 Đổi sao lấy quà</Text>
+        <Text style={styles.paragraph}>⭐ {availableStars(progress)} sao có thể dùng · 🏅 {progress.stars} sao đã kiếm</Text>
+        <Text style={styles.muted}>Phần thưởng ảo trong ứng dụng, không tốn tiền thật và không có phần thưởng ngẫu nhiên.</Text>
+      </View>
+      {shopMessage?<View style={[styles.card,{backgroundColor:'#e4f8e9'}]}><Text style={styles.rowTitle}>{shopMessage}</Text></View>:null}
+      <Text style={styles.section}>Bộ sưu tập của con</Text>
+      {STAR_REWARDS.map(reward=>{const owned=(progress.ownedRewards||[]).includes(reward.id);
+        const equipped=progress.equippedReward===reward.id;
+        return <View key={reward.id} style={[styles.card,{backgroundColor:equipped?'#fff2cd':'#fff'}]}>
+          <View style={styles.rowBetween}><Text style={styles.rowTitle}>{reward.icon} {reward.title}</Text><Text style={styles.progressText}>{equipped?'Đang dùng':owned?'Đã có':reward.price+' ⭐'}</Text></View>
+          <Text style={styles.paragraph}>{reward.description}</Text>
+          <Button disabled={equipped||(!owned&&availableStars(progress)<reward.price)}
+            secondary={owned} onPress={()=>owned?wearReward(reward.id):buyReward(reward.id)}>
+            {equipped?'✓ Đang đồng hành':owned?'Chọn làm bạn đồng hành':availableStars(progress)<reward.price?'Cần thêm '+(reward.price-availableStars(progress))+' sao':'Đổi '+reward.price+' sao'}
+          </Button>
+        </View>;})}
+      <Text style={styles.footnote}>Đổi quà không làm mất huy hiệu, kỷ lục ải hoặc tổng sao đã kiếm. Quà đã mở khóa được lưu trong bản sao lưu JSON V8.</Text>
+      <Button secondary onPress={()=>setScreen('home')}>Về Menu →</Button>
+    </>}
     {screen === 'book' && <>{header('Chọn bộ sách')}<Text style={styles.section}>Con đang sử dụng bộ sách nào?</Text>{BOOKS.map(b=><Pressable key={b.id} onPress={()=>{setBook(b.id);save({...progress,book:b.id});}} style={[styles.choice,book===b.id&&styles.choiceActive]}><Text style={styles.choiceText}>{b.name}</Text><Text>{book===b.id?'✅':'○'}</Text></Pressable>)}<Text style={styles.footnote}>Bộ sách là thiết lập hồ sơ. Thứ tự và ma trận đề chính thức của từng sách chưa được đối chiếu; học theo lộ trình chung 120 thẻ.</Text><Button onPress={()=>setScreen('home')}>Xong</Button></>}
 
     {screen === 'sharkChoose' && <>
@@ -985,7 +1033,7 @@ export default function App() {
 
     {screen === 'quiz' && q && <>{header(mode === 'game' ? '🎮 Vượt ải' : mode === 'test' ? '🏆 Kiểm tra' : '✏️ Luyện tập', 'home')}<View style={styles.rowBetween}><Text style={styles.muted}>{mode==='test'&&examKind!=='topic'?'Đề tổng hợp':currentTopic.title} · {level}</Text><Text style={styles.progressText}>Câu {index + 1}/{questions.length}</Text></View><View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${(index + 1) / questions.length * 100}%` }]} /></View><View style={styles.questionCard}><Text style={styles.questionLabel}>TÍNH VÀ ĐIỀN ĐÁP ÁN</Text><Text style={styles.question}>{q.question}</Text><MathIllustration question={q} height={illustrationHeight}/><TextInput style={[styles.answerInput, checked && { borderColor: isCorrect ? GREEN : '#d14b4b' }]} placeholder="Nhập đáp án" placeholderTextColor="#91a09a" keyboardType="number-pad" value={input} onChangeText={setInput} editable={!checked} returnKeyType="done" onSubmitEditing={checkAnswer} accessibilityLabel="Đáp án của con" /><Text style={styles.muted}>Có thể nhập số có hoặc không có dấu cách.</Text></View>{checked && mode !== 'test' && <View style={[styles.feedback, { backgroundColor: isCorrect ? '#e6f4ea' : '#fff0ed' }]}><Text style={styles.feedbackTitle}>{isCorrect ? '🎉 Chính xác! Giỏi lắm!' : `💡 Đáp án đúng: ${formatNum(q.answer)}`}</Text><Text style={styles.paragraph}>{q.explanation}</Text></View>}{!checked && mode !== 'test' && <View style={styles.card}><Button secondary small onPress={() => setHintLevel(v => Math.min(3, v + 1))}>💡 Gợi ý {hintLevel}/3</Button>{hintLevel > 0 && <Text style={styles.paragraph}>{hintLevel === 1 ? 'Đọc kỹ đề bài: con cần tìm giá trị nào? Hãy nhớ quy tắc đã học trong chủ đề này.' : hintLevel === 2 ? 'Hãy viết phép tính ra giấy và kiểm tra từng bước trước khi điền đáp án.' : q.explanation}</Text>}</View>}{!checked ? <Button disabled={!normalize(input)} onPress={checkAnswer}>{mode === 'test' ? 'Ghi nhận câu trả lời' : 'Kiểm tra đáp án'}</Button> : <Button onPress={nextQuestion}>{index + 1 === questions.length ? 'Xem kết quả →' : 'Câu tiếp theo →'}</Button>}<Text style={styles.footnote}>Nếu con làm sai, hãy đọc lời giải trước khi tiếp tục.</Text></>}
 
-    {screen === 'result' && sessionDone && <>{header('Kết quả')}<View style={styles.resultCard}><Text style={styles.resultEmoji}>{sessionDone.correct / sessionDone.total >= .8 ? '🏆' : '🌈'}</Text><Text style={styles.section}>Con đã hoàn thành!</Text><Text style={styles.bigScore}>{sessionDone.score.toFixed(1).replace('.', ',')}/10</Text><Text style={styles.paragraph}>{sessionDone.correct}/{sessionDone.total} câu đúng</Text>{(mode === 'game'||mode==='mini'||mode==='shark'||mode==='drag') && <Text style={styles.heroStars}>+ {sessionDone.stars} ⭐</Text>}</View>{sessionDone.answers.filter(a => mode === 'test' || !a.correct).length > 0 && <><Text style={styles.section}>{mode === 'test' ? 'Đáp án và lời giải' : 'Câu cần ôn lại'}</Text>{sessionDone.answers.filter(a => mode === 'test' || !a.correct).map((a, i) => <View key={i} style={styles.card}><Text style={styles.rowTitle}>{a.question}</Text><Text style={styles.muted}>Con trả lời: {a.userAnswer} · Đúng: {formatNum(a.answer)} {a.correct ? '✅' : '❌'}</Text><Text style={styles.paragraph}>{a.explanation}</Text></View>)}</>}<Button onPress={() => mode==='mini'?beginMini():mode==='shark'?startShark():mode==='drag'?startMatch():mode==='review'?beginReview():begin(mode,topic,level)}>Làm lượt mới</Button><Button secondary onPress={() => setScreen('home')}>Về trang chủ</Button></>}
+    {screen === 'result' && sessionDone && <>{header('Kết quả')}<Button secondary onPress={()=>setScreen('shop')}>🎁 Dùng sao đổi bạn đồng hành →</Button><View style={styles.resultCard}><Text style={styles.resultEmoji}>{sessionDone.correct / sessionDone.total >= .8 ? '🏆' : '🌈'}</Text><Text style={styles.section}>Con đã hoàn thành!</Text><Text style={styles.bigScore}>{sessionDone.score.toFixed(1).replace('.', ',')}/10</Text><Text style={styles.paragraph}>{sessionDone.correct}/{sessionDone.total} câu đúng</Text>{(mode === 'game'||mode==='mini'||mode==='shark'||mode==='drag') && <Text style={styles.heroStars}>+ {sessionDone.stars} ⭐</Text>}</View>{sessionDone.answers.filter(a => mode === 'test' || !a.correct).length > 0 && <><Text style={styles.section}>{mode === 'test' ? 'Đáp án và lời giải' : 'Câu cần ôn lại'}</Text>{sessionDone.answers.filter(a => mode === 'test' || !a.correct).map((a, i) => <View key={i} style={styles.card}><Text style={styles.rowTitle}>{a.question}</Text><Text style={styles.muted}>Con trả lời: {a.userAnswer} · Đúng: {formatNum(a.answer)} {a.correct ? '✅' : '❌'}</Text><Text style={styles.paragraph}>{a.explanation}</Text></View>)}</>}<Button onPress={() => mode==='mini'?beginMini():mode==='shark'?startShark():mode==='drag'?startMatch():mode==='review'?beginReview():begin(mode,topic,level)}>Làm lượt mới</Button><Button secondary onPress={() => setScreen('home')}>Về trang chủ</Button></>}
 
     {screen === 'history' && <>{header('Thành tích')}<View style={styles.stats}><View><Text style={styles.statNumber}>{progress.history.length}</Text><Text style={styles.muted}>Lượt học</Text></View><View><Text style={styles.statNumber}>{average}%</Text><Text style={styles.muted}>Tỷ lệ đúng</Text></View><View><Text style={styles.statNumber}>{progress.stars}</Text><Text style={styles.muted}>Ngôi sao</Text></View></View><Text style={styles.section}>Huy hiệu đã nhận</Text><Text style={styles.paragraph}>{(progress.badges||[]).length?(progress.badges||[]).map(b=>'🏅 '+b).join(' · '):'Hoàn thành các thử thách để nhận huy hiệu.'}</Text><Text style={styles.section}>Lịch sử gần đây</Text>{progress.history.length === 0 ? <Text style={styles.muted}>Chưa có kết quả. Hãy làm một lượt bài tập nhé!</Text> : progress.history.slice(0, 30).map(h => <Pressable key={h.id} style={styles.card} onPress={() => { setSessionDone(h); setScreen('pastResult'); }}><Text style={styles.rowTitle}>{TOPICS.find(t => t.id === h.topic)?.title || h.topic} · {h.level}</Text><Text style={styles.muted}>{new Date(h.date).toLocaleString('vi-VN')} · {(h.mode === 'game'||h.mode==='mini') ? 'Trò chơi' : h.mode === 'test' ? 'Kiểm tra' : h.mode==='shark'?'Vượt biển':h.mode==='drag'?'Kéo thả':h.mode==='steps'?'Toán nhiều bước':h.mode==='review'?'Ôn lỗi sai':'Luyện tập'}</Text><Text style={styles.progressText}>{h.correct}/{h.total} đúng · {h.score.toFixed(1).replace('.', ',')}/10</Text></Pressable>)}</>}
 
@@ -1011,7 +1059,7 @@ export default function App() {
       <Button secondary onPress={loadPreRestore}>Nạp bản dự phòng trước lần khôi phục gần nhất</Button>
       <Text style={styles.footnote}>Dữ liệu lưu tại thiết bị/trình duyệt đang dùng. Cài APK mới không tự chuyển dữ liệu từ Snack sang ứng dụng Android; hãy sao lưu trên Snack rồi nhập vào APK. Cài lại hoặc xóa dữ liệu ứng dụng sẽ làm mất dữ liệu chưa xuất ra ngoài.</Text>
     </>}
-    {screen === 'parent' && <>{header('Góc bố mẹ')}<Text style={styles.section}>Báo cáo học tập</Text><View style={styles.stats}><View><Text style={styles.statNumber}>{totalAnswered}</Text><Text style={styles.muted}>Câu đã làm</Text></View><View><Text style={styles.statNumber}>{average}%</Text><Text style={styles.muted}>Tỷ lệ đúng</Text></View><View><Text style={styles.statNumber}>{progress.history.length}</Text><Text style={styles.muted}>Lượt học</Text></View></View><Text style={styles.section}>Độ khó gợi ý cho buổi tiếp theo</Text>{TOPICS.map(t=><Text key={t.id} style={styles.muted}>{t.icon} {t.title}: {recommendedLevel(progress.history,t.id)} ({topicStats(progress.history,t.id).total} câu đã ghi nhận)</Text>)}<Text style={styles.section}>Kết quả theo chủ đề</Text>{TOPICS.map(t => { const st=topicStats(progress.history,t.id); const total=st.total; const correct=st.correct; const pct = total ? Math.round(correct / total * 100) : 0; return <View key={t.id} style={styles.card}><View style={styles.rowBetween}><Text style={styles.rowTitle}>{t.icon} {t.title}</Text><Text style={styles.progressText}>{total ? pct + '%' : 'Chưa học'}</Text></View><View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${pct}%` }]} /></View><Text style={styles.muted}>{correct}/{total} câu đúng</Text></View>; })}<Text style={styles.footnote}>Bản Pro thử nghiệm: báo cáo trên cùng điện thoại; chưa có mã PIN phụ huynh; có thể xuất/nhập bản sao lưu JSON thủ công ở cuối màn này.</Text><Button secondary onPress={() => setScreen('reviewPlan')}>Ôn tập cá nhân hóa và xu hướng</Button><Button secondary onPress={() => setScreen('coach')}>Xem gợi ý gia sư offline</Button><Button secondary onPress={() => setScreen('history')}>Xem lịch sử chi tiết</Button><Button secondary onPress={generateBackup}>Sao lưu / khôi phục dữ liệu</Button></>}
+    {screen === 'parent' && <>{header('Góc bố mẹ')}<Text style={styles.muted}>Sao tích lũy: {progress.stars} · Đã dùng: {progress.starSpent||0} · Còn lại: {availableStars(progress)} · Quà mở khóa: {(progress.ownedRewards||[]).length}</Text><Text style={styles.section}>Báo cáo học tập</Text><View style={styles.stats}><View><Text style={styles.statNumber}>{totalAnswered}</Text><Text style={styles.muted}>Câu đã làm</Text></View><View><Text style={styles.statNumber}>{average}%</Text><Text style={styles.muted}>Tỷ lệ đúng</Text></View><View><Text style={styles.statNumber}>{progress.history.length}</Text><Text style={styles.muted}>Lượt học</Text></View></View><Text style={styles.section}>Độ khó gợi ý cho buổi tiếp theo</Text>{TOPICS.map(t=><Text key={t.id} style={styles.muted}>{t.icon} {t.title}: {recommendedLevel(progress.history,t.id)} ({topicStats(progress.history,t.id).total} câu đã ghi nhận)</Text>)}<Text style={styles.section}>Kết quả theo chủ đề</Text>{TOPICS.map(t => { const st=topicStats(progress.history,t.id); const total=st.total; const correct=st.correct; const pct = total ? Math.round(correct / total * 100) : 0; return <View key={t.id} style={styles.card}><View style={styles.rowBetween}><Text style={styles.rowTitle}>{t.icon} {t.title}</Text><Text style={styles.progressText}>{total ? pct + '%' : 'Chưa học'}</Text></View><View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${pct}%` }]} /></View><Text style={styles.muted}>{correct}/{total} câu đúng</Text></View>; })}<Text style={styles.footnote}>Bản Pro thử nghiệm: báo cáo trên cùng điện thoại; chưa có mã PIN phụ huynh; có thể xuất/nhập bản sao lưu JSON thủ công ở cuối màn này.</Text><Button secondary onPress={() => setScreen('reviewPlan')}>Ôn tập cá nhân hóa và xu hướng</Button><Button secondary onPress={() => setScreen('coach')}>Xem gợi ý gia sư offline</Button><Button secondary onPress={() => setScreen('history')}>Xem lịch sử chi tiết</Button><Button secondary onPress={generateBackup}>Sao lưu / khôi phục dữ liệu</Button></>}
   </ScrollView></SafeAreaView>;
 }
 
