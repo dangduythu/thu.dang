@@ -717,6 +717,7 @@ export default function App() {
     const completed=Array.from(new Set([...(progress.lessonsDone||[]),activeLessonId]));
     const next=CURRICULUM.find(l=>!completed.includes(l.id));
     save({...progress,lessonsDone:completed,currentLesson:next?next.id:null});
+    setLessonCheckInput('');setLessonCheckResult(null);
     if(next){setActiveLessonId(next.id);setTopic(next.topic);}else setScreen('curriculum');
   }
   async function submitLessonCheck(){
