@@ -79,7 +79,7 @@ function make(group,n){
       if(t===3)return exercise(`Diện tích hình vuông cạnh ${x} cm là bao nhiêu cm²?`,x*x,`${x} × ${x} = ${x*x} cm².`,'Diện tích hình vuông');
       if(t===4)return exercise(`Hình chữ nhật chu vi ${2*(x+y)} cm, chiều dài ${x} cm. Chiều rộng là bao nhiêu cm?`,y,`Nửa chu vi ${x+y}; trừ chiều dài ${x} được ${y} cm.`,'Tìm cạnh');
       if(t===5)return exercise(`Hình vuông chu vi ${4*x} cm, cạnh là bao nhiêu cm?`,x,`${4*x} : 4 = ${x} cm.`,'Tìm cạnh');
-      if(t===6)return exercise(`Một góc ${30+n%10}° là góc nhọn (1), vuông (2) hay tù (3)?`,1,'Góc nhỏ hơn 90° là góc nhọn.','Nhận biết góc');
+      if(t===6)return exercise(`Một góc ${30+Math.floor(n/8)}° là góc nhọn (1), vuông (2) hay tù (3)?`,1,'Góc nhỏ hơn 90° là góc nhọn.','Nhận biết góc');
       return exercise(`Một góc ${100+n%25}° là góc nhọn (1), vuông (2) hay tù (3)?`,3,'Góc lớn hơn 90° và nhỏ hơn 180° là góc tù.','Nhận biết góc');
     }
     case 'units':{
