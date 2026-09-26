@@ -14,7 +14,9 @@ export function normalizeProgress(raw) {
     badges:list(p.badges), stages:isObject(p.stages)?p.stages:{},
     lessonsDone:list(p.lessonsDone), currentLesson:typeof p.currentLesson==='string'?p.currentLesson:null,
     lessonChecks:isObject(p.lessonChecks)?p.lessonChecks:{},
-    book:typeof p.book==='string'?p.book:'general'
+    book:typeof p.book==='string'?p.book:'general',
+    starSpent:integer(p.starSpent), ownedRewards:list(p.ownedRewards).filter(id=>typeof id==='string'),
+    equippedReward:typeof p.equippedReward==='string'?p.equippedReward:null
   };
 }
 export function makeBackup(progress, book) {
