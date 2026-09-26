@@ -61,7 +61,7 @@ function make(group,n){
       return exercise(`Tính nhanh ${x} × (${y} + ${z}) − ${x} × ${y}.`,x*z,`Rút gọn còn ${x} × ${z} = ${x*z}.`,'Tính nhanh nhiều bước');
     }
     case 'fractions':{
-      const denominator=5+n%9,numerator=1+n%(denominator-1),mult=2+n%4,other=(numerator% (denominator-1))+1;
+      const denominator=5+Math.floor(n/8),numerator=1+n%(denominator-1),mult=2+n%4,other=(numerator% (denominator-1))+1;
       if(t===0)return exercise(`Điền tử số: ${numerator}/${denominator} = ?/${denominator*mult}.`,numerator*mult,`Nhân cả tử và mẫu với ${mult}; tử mới ${numerator*mult}.`,'Phân số bằng nhau');
       if(t===1)return exercise(`Rút gọn ${numerator*mult}/${denominator*mult} bằng cách chia cả tử và mẫu cho ${mult}. Tử số mới là bao nhiêu?`,numerator,`Tử mới = ${numerator*mult} : ${mult} = ${numerator}.`,'Rút gọn');
       if(t===2)return exercise(`Hai phân số ${numerator}/${denominator} và ${numerator+1}/${denominator}; tử số của phân số lớn hơn là bao nhiêu?`,numerator+1,'Cùng mẫu dương, so sánh tử số.','So sánh cùng mẫu');
@@ -72,7 +72,7 @@ function make(group,n){
       return exercise(`Tìm số phần chưa tô: Hình có ${denominator} phần bằng nhau, đã tô ${numerator} phần.`,denominator-numerator,`${denominator} − ${numerator} = ${denominator-numerator} phần.`,'Nhận biết phân số');
     }
     case 'geometry':{
-      const x=5+n%20,y=3+n%11;
+      const x=5+Math.floor(n/8),y=3+Math.floor(n/8)%11;
       if(t===0)return exercise(`Chu vi hình chữ nhật dài ${x} cm, rộng ${y} cm là bao nhiêu cm?`,2*(x+y),`(${x} + ${y}) × 2 = ${2*(x+y)} cm.`,'Chu vi');
       if(t===1)return exercise(`Diện tích hình chữ nhật dài ${x} cm, rộng ${y} cm là bao nhiêu cm²?`,x*y,`${x} × ${y} = ${x*y} cm².`,'Diện tích');
       if(t===2)return exercise(`Chu vi hình vuông cạnh ${x} cm là bao nhiêu cm?`,4*x,`${x} × 4 = ${4*x} cm.`,'Chu vi hình vuông');
@@ -83,7 +83,7 @@ function make(group,n){
       return exercise(`Một góc ${100+n%25}° là góc nhọn (1), vuông (2) hay tù (3)?`,3,'Góc lớn hơn 90° và nhỏ hơn 180° là góc tù.','Nhận biết góc');
     }
     case 'units':{
-      const x=3+n%80;
+      const x=3+Math.floor(n/8);
       if(t===0)return exercise(`Đổi ${x} m = ? cm.`,x*100,`1 m = 100 cm; ${x} × 100 = ${x*100} cm.`,'Độ dài');
       if(t===1)return exercise(`Đổi ${x} kg = ? g.`,x*1000,`1 kg = 1 000 g; ${x} × 1 000 = ${x*1000} g.`,'Khối lượng');
       if(t===2)return exercise(`Đổi ${x} km = ? m.`,x*1000,`1 km = 1 000 m; ${x} × 1 000 = ${x*1000} m.`,'Độ dài');
@@ -105,7 +105,7 @@ function make(group,n){
       return exercise(`Mỗi ngày đọc ${num} trang trong ${y} ngày, sau đó đọc thêm ${z} trang. Tổng cộng bao nhiêu trang?`,num*y+z,`${num} × ${y} + ${z} = ${num*y+z} trang.`,'Toán hai bước');
     }
     case 'patterns':{
-      const x=2+n%23,step=2+n%11;
+      const x=2+Math.floor(n/8),step=2+Math.floor(n/8)%11;
       if(t===0)return exercise(`Tìm số tiếp theo: ${x}, ${x+step}, ${x+2*step}, ${x+3*step}, ?`,x+4*step,`Mỗi số tăng ${step}; số tiếp theo ${x+4*step}.`,'Dãy cộng');
       if(t===1)return exercise(`Tìm số tiếp theo: ${x}, ${x*2}, ${x*4}, ${x*8}, ?`,x*16,`Mỗi số gấp đôi; ${x*8} × 2 = ${x*16}.`,'Dãy nhân');
       if(t===2)return exercise(`Tìm số còn thiếu: ${x}, ${x+step}, ?, ${x+3*step}.`,x+2*step,`Số thứ ba bằng ${x} + 2 × ${step} = ${x+2*step}.`,'Điền quy luật');
