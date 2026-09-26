@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator, Alert, Animated, Easing, Keyboard, KeyboardAvoidingView, PanResponder, Platform, Pressable, SafeAreaView,
-  ScrollView, StatusBar, StyleSheet, Text, TextInput, View, useWindowDimensions,
+  ScrollView, Share, StatusBar, StyleSheet, Text, TextInput, View, useWindowDimensions,
 } from 'react-native';
 import Svg, { Circle, Defs, Ellipse, G, LinearGradient, Path, Polygon, Rect, Stop, Text as SvgText } from 'react-native-svg';
 import { useRef } from 'react';
@@ -9,8 +9,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {CURRICULUM, curriculumFor, getLesson, getNextLesson, BOOK_TOPIC_ORDER} from './Curriculum';
 import {makeLessonCheck, evaluateLearning, recommendLearning} from './LearningEngine';
 import {recentMistakes, topicTrends, dailyReviewPlan} from './PersonalizedPractice';
+import {PROGRESS_KEY, PRE_RESTORE_KEY, normalizeProgress, makeBackup, parseBackup, progressSummary} from './ProgressStorage';
 
-const SAVE_KEY = 'mathkid4_v1_progress'; // Giữ khóa cũ để đọc lại lịch sử V5.
+const SAVE_KEY = PROGRESS_KEY; // Giữ chính xác khóa V5–V7.5 để đọc lịch sử cũ.
 const BOOKS = [
   {id:'general', name:'Kiến thức chung lớp 4'},
   {id:'kntt', name:'Kết nối tri thức với cuộc sống'},
@@ -20,7 +21,7 @@ const BOOKS = [
 // Bản alpha: lựa chọn bộ sách là tùy chọn hồ sơ, CHƯA phải ma trận đề được duyệt theo SGK.
 
 const GREEN = '#168451';
-const APP_VERSION = 'V7.5 Preview · Gia sư cá nhân hóa';
+const APP_VERSION = 'V8.0 RC · Android Offline';
 const TOPICS = [
   { id: 'numbers', title: 'Số tự nhiên', icon: '🔢', color: '#e6f4ea', description: 'Hàng, lớp, so sánh và làm tròn số', lessons: [
     ['Hàng và lớp', 'Trong số 36 425, chữ số 6 ở hàng nghìn nên có giá trị 6 000.', '36 425 = 30 000 + 6 000 + 400 + 20 + 5.'],
@@ -525,6 +526,7 @@ export default function App() {
   const [backupText,setBackupText]=useState('');
   const [restoreText,setRestoreText]=useState('');
   const [restoreConfirmed,setRestoreConfirmed]=useState(false);
+  const [restoreSummary,setRestoreSummary]=useState(null);
   const [mode, setMode] = useState('practice');
   const [questions, setQuestions] = useState([]);
   const [index, setIndex] = useState(0);
@@ -579,7 +581,8 @@ export default function App() {
         const raw = await AsyncStorage.getItem(SAVE_KEY);
         if (raw) {
           const data = JSON.parse(raw);
-          setProgress({ history: Array.isArray(data.history) ? data.history : [], seen: Array.isArray(data.seen) ? data.seen : [], stars: Number(data.stars) || 0, badges: Array.isArray(data.badges) ? data.badges : [], stages: data.stages && typeof data.stages === 'object' ? data.stages : {}, lessonsDone:Array.isArray(data.lessonsDone)?data.lessonsDone:[], currentLesson:typeof data.currentLesson==='string'?data.currentLesson:null,lessonChecks:data.lessonChecks&&typeof data.lessonChecks==='object'&&!Array.isArray(data.lessonChecks)?data.lessonChecks:{} }); setBook(BOOKS.some(b=>b.id===data.book)?data.book:'general');
+          const migrated=normalizeProgress(data);
+          setProgress(migrated); setBook(BOOKS.some(b=>b.id===migrated.book)?migrated.book:'general');
         }
       } catch (e) { console.warn('Cannot load saved progress:', e); }
       setReady(true);
@@ -587,8 +590,9 @@ export default function App() {
   }, []);
 
   async function save(data) {
-    setProgress(data);
-    try { await AsyncStorage.setItem(SAVE_KEY, JSON.stringify({...data,book:data.book||book})); }
+    const normalized=normalizeProgress({...data,book:data.book||book});
+    setProgress(normalized);
+    try { await AsyncStorage.setItem(SAVE_KEY, JSON.stringify(normalized)); }
     catch (e) { Alert.alert('Lỗi lưu dữ liệu', 'Không thể lưu kết quả. Hãy kiểm tra dung lượng thiết bị.'); }
   }
 
@@ -745,20 +749,44 @@ export default function App() {
     setLessonCheckResult(correct?'correct':'wrong');
   }
   function generateBackup(){
-    const payload={format:'mathkid4-backup',version:1,createdAt:new Date().toISOString(),progress:{...progress,book}};
-    setBackupText(JSON.stringify(payload));setRestoreConfirmed(false);setScreen('backup');
+    const payload=makeBackup(progress,book);
+    setBackupText(JSON.stringify(payload,null,2));
+    setRestoreConfirmed(false);setRestoreSummary(null);setScreen('backup');
+  }
+  async function shareBackup(){
+    try {
+      const payload=backupText || JSON.stringify(makeBackup(progress,book),null,2);
+      await Share.share({title:'Sao lưu MathKid 4 Pro',message:payload});
+    } catch(e){Alert.alert('Không thể chia sẻ','Hãy sao chép văn bản sao lưu bên dưới để lưu riêng.');}
+  }
+  function previewRestore(){
+    try {
+      const restored=parseBackup(restoreText);
+      setRestoreSummary(progressSummary(restored));
+      setRestoreConfirmed(false);
+    }catch(e){setRestoreSummary(null);Alert.alert('Bản sao lưu không hợp lệ',String(e.message||e));}
   }
   async function restoreBackup(){
-    try{
-      const parsed=JSON.parse(restoreText);
-      if(parsed.format!=='mathkid4-backup'||parsed.version!==1||!parsed.progress||!Array.isArray(parsed.progress.history)||!Array.isArray(parsed.progress.seen))throw Error('Định dạng tệp không đúng');
-      if(!restoreConfirmed){Alert.alert('Xác nhận khôi phục','Dữ liệu trong bản sao lưu sẽ thay thế lịch sử hiện tại. Hãy chọn xác nhận trước.');return;}
-      const p=parsed.progress;
-      const restored={...emptyProgress(),...p,history:p.history,seen:p.seen,badges:Array.isArray(p.badges)?p.badges:[],lessonsDone:Array.isArray(p.lessonsDone)?p.lessonsDone:[],lessonChecks:p.lessonChecks&&typeof p.lessonChecks==='object'&&!Array.isArray(p.lessonChecks)?p.lessonChecks:{},stages:p.stages&&typeof p.stages==='object'?p.stages:{},stars:Number(p.stars)||0};
+    if(!restoreConfirmed||!restoreSummary)return;
+    try {
+      const restored=parseBackup(restoreText);
+      // Safety net survives reload and can be used for manual recovery.
+      await AsyncStorage.setItem(PRE_RESTORE_KEY, JSON.stringify(makeBackup(progress,book)));
       await AsyncStorage.setItem(SAVE_KEY,JSON.stringify(restored));
       setProgress(restored);setBook(BOOKS.some(b=>b.id===restored.book)?restored.book:'general');
-      setRestoreText('');setRestoreConfirmed(false);Alert.alert('Đã khôi phục','Đã đọc dữ liệu sao lưu.');setScreen('parent');
-    }catch(e){Alert.alert('Không thể khôi phục','Kiểm tra nội dung sao lưu: '+String(e.message||e));}
+      setRestoreText('');setRestoreSummary(null);setRestoreConfirmed(false);
+      Alert.alert('Khôi phục hoàn tất','Dữ liệu cũ đã được lưu vào bản sao dự phòng trong thiết bị.');
+      setScreen('parent');
+    }catch(e){Alert.alert('Không thể khôi phục','Kiểm tra dữ liệu và dung lượng thiết bị: '+String(e.message||e));}
+  }
+  async function loadPreRestore(){
+    try {
+      const previous=await AsyncStorage.getItem(PRE_RESTORE_KEY);
+      if(!previous){Alert.alert('Chưa có bản dự phòng','Bản này chỉ được tạo khi bạn thực hiện khôi phục dữ liệu.');return;}
+      const p=parseBackup(previous);
+      setRestoreText(previous);setRestoreSummary(progressSummary(p));setRestoreConfirmed(false);
+      Alert.alert('Đã nạp bản dự phòng','Hãy kiểm tra các chỉ số bên dưới và xác nhận nếu muốn khôi phục.');
+    }catch(e){Alert.alert('Không thể đọc bản dự phòng',String(e.message||e));}
   }
   function header(title, back = 'home') {
     return <View style={styles.header}><Pressable onPress={() => setScreen(back)} style={styles.back}><Text style={styles.backText}>‹</Text></Pressable><Text style={styles.headerText}>{title}</Text><View style={{ width: 34 }} /></View>;
@@ -830,7 +858,7 @@ export default function App() {
         <Tile icon="📝" title="Giải toán 3 bước" subtitle="Chấm điểm từng bước" color="#e8e6ff" onPress={startWord} />
         <Tile icon="📘" title="Chọn bộ SGK" subtitle="Cài đặt lộ trình tham khảo" color="#e9f2f9" onPress={() => setScreen('book')} />
       </View>
-      <Text style={styles.footnote}>Bài học và kết quả được lưu trên thiết bị. Bản APK đóng gói đầy đủ có thể học lõi offline; Expo Snack cần kết nối khi tải ban đầu.</Text>
+      <Text style={styles.footnote}>Bài học, trò chơi và kết quả được xử lý trên thiết bị. APK cần được đóng gói và thử nghiệm offline; Expo Snack cần mạng để tải ban đầu.</Text>
     </>}
 
     {screen === 'book' && <>{header('Chọn bộ sách')}<Text style={styles.section}>Con đang sử dụng bộ sách nào?</Text>{BOOKS.map(b=><Pressable key={b.id} onPress={()=>{setBook(b.id);save({...progress,book:b.id});}} style={[styles.choice,book===b.id&&styles.choiceActive]}><Text style={styles.choiceText}>{b.name}</Text><Text>{book===b.id?'✅':'○'}</Text></Pressable>)}<Text style={styles.footnote}>Bộ sách là thiết lập hồ sơ. Thứ tự và ma trận đề chính thức của từng sách chưa được đối chiếu; học theo lộ trình chung 120 thẻ.</Text><Button onPress={()=>setScreen('home')}>Xong</Button></>}
@@ -945,14 +973,24 @@ export default function App() {
     {screen === 'pastResult' && sessionDone && <>{header('Chi tiết lượt học', 'history')}<Text style={styles.section}>{sessionDone.correct}/{sessionDone.total} đúng · {sessionDone.score.toFixed(1).replace('.', ',')}/10</Text>{sessionDone.answers.map((a, i) => <View key={i} style={styles.card}><Text style={styles.rowTitle}>{i + 1}. {a.question} {a.correct ? '✅' : '❌'}</Text><Text style={styles.muted}>Con trả lời: {a.userAnswer} · Đáp án: {formatNum(a.answer)}</Text><Text style={styles.paragraph}>{a.explanation}</Text></View>)}</>}
 
     {screen === 'backup' && <>{header('Sao lưu dữ liệu','parent')}
-      <Text style={styles.section}>Sao lưu bằng văn bản JSON</Text>
-      <Text style={styles.muted}>Chạm giữ để chọn và sao chép toàn bộ nội dung bên dưới vào tệp văn bản riêng. Không gửi dữ liệu học tập cho người lạ.</Text>
+      <Text style={styles.section}>Sao lưu offline · V8</Text>
+      <Text style={styles.muted}>Sao lưu lưu lịch sử, sao, huy hiệu và 120 thẻ. Chọn Chia sẻ để lưu nội dung JSON ra ứng dụng khác hoặc chạm giữ để sao chép. Không có đồng bộ đám mây tự động.</Text>
+      <View style={styles.card}><Text style={styles.rowTitle}>Dữ liệu hiện có</Text>
+        <Text style={styles.paragraph}>{progressSummary(progress).sessions} lượt học · {progressSummary(progress).answered} câu · {progress.stars} sao · {progressSummary(progress).lessons} thẻ</Text>
+        <Button onPress={shareBackup}>Chia sẻ bản sao lưu JSON →</Button>
+      </View>
       <Text selectable style={[styles.paragraph,{backgroundColor:'#fff',padding:12,borderRadius:12}]}>{backupText}</Text>
-      <Text style={styles.section}>Khôi phục bản sao lưu</Text>
-      <TextInput multiline style={[styles.answerInput,{minHeight:110,textAlignVertical:'top'}]} placeholder="Dán toàn bộ JSON sao lưu vào đây" value={restoreText} onChangeText={setRestoreText}/>
-      <Pressable style={styles.choice} onPress={()=>setRestoreConfirmed(v=>!v)}><Text style={styles.choiceText}>{restoreConfirmed?'☑':'□'} Tôi hiểu việc khôi phục sẽ thay thế lịch sử hiện tại</Text></Pressable>
-      <Button disabled={!restoreConfirmed||!restoreText.trim()} onPress={restoreBackup}>Khôi phục dữ liệu đã sao lưu</Button>
-      <Text style={styles.footnote}>Đây là bản sao lưu thủ công, chưa có đồng bộ đám mây hoặc chọn tệp trực tiếp.</Text>
+      <Text style={styles.section}>Khôi phục và bảo vệ dữ liệu</Text>
+      <Text style={styles.muted}>Dán bản sao lưu V6.5/V7/V8. Ứng dụng kiểm tra trước khi ghi đè và tạo bản dự phòng trong máy.</Text>
+      <TextInput multiline style={[styles.answerInput,{minHeight:110,textAlignVertical:'top'}]} placeholder="Dán toàn bộ JSON sao lưu vào đây" value={restoreText} onChangeText={s=>{setRestoreText(s);setRestoreSummary(null);setRestoreConfirmed(false);}}/>
+      <Button secondary disabled={!restoreText.trim()} onPress={previewRestore}>Kiểm tra bản sao lưu</Button>
+      {restoreSummary&&<View style={styles.card}><Text style={styles.rowTitle}>Bản sao lưu sắp khôi phục</Text>
+        <Text style={styles.paragraph}>{restoreSummary.sessions} lượt · {restoreSummary.answered} câu · {restoreSummary.stars} sao · {restoreSummary.lessons} thẻ</Text>
+        <Pressable style={styles.choice} onPress={()=>setRestoreConfirmed(v=>!v)}><Text style={styles.choiceText}>{restoreConfirmed?'☑':'□'} Tôi đồng ý thay thế dữ liệu hiện tại sau khi đã xem các chỉ số</Text></Pressable>
+        <Button disabled={!restoreConfirmed} onPress={restoreBackup}>Xác nhận khôi phục →</Button>
+      </View>}
+      <Button secondary onPress={loadPreRestore}>Nạp bản dự phòng trước lần khôi phục gần nhất</Button>
+      <Text style={styles.footnote}>Dữ liệu lưu tại thiết bị/trình duyệt đang dùng. Cài APK mới không tự chuyển dữ liệu từ Snack sang ứng dụng Android; hãy sao lưu trên Snack rồi nhập vào APK. Cài lại hoặc xóa dữ liệu ứng dụng sẽ làm mất dữ liệu chưa xuất ra ngoài.</Text>
     </>}
     {screen === 'parent' && <>{header('Góc bố mẹ')}<Text style={styles.section}>Báo cáo học tập</Text><View style={styles.stats}><View><Text style={styles.statNumber}>{totalAnswered}</Text><Text style={styles.muted}>Câu đã làm</Text></View><View><Text style={styles.statNumber}>{average}%</Text><Text style={styles.muted}>Tỷ lệ đúng</Text></View><View><Text style={styles.statNumber}>{progress.history.length}</Text><Text style={styles.muted}>Lượt học</Text></View></View><Text style={styles.section}>Độ khó gợi ý cho buổi tiếp theo</Text>{TOPICS.map(t=><Text key={t.id} style={styles.muted}>{t.icon} {t.title}: {recommendedLevel(progress.history,t.id)} ({topicStats(progress.history,t.id).total} câu đã ghi nhận)</Text>)}<Text style={styles.section}>Kết quả theo chủ đề</Text>{TOPICS.map(t => { const st=topicStats(progress.history,t.id); const total=st.total; const correct=st.correct; const pct = total ? Math.round(correct / total * 100) : 0; return <View key={t.id} style={styles.card}><View style={styles.rowBetween}><Text style={styles.rowTitle}>{t.icon} {t.title}</Text><Text style={styles.progressText}>{total ? pct + '%' : 'Chưa học'}</Text></View><View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${pct}%` }]} /></View><Text style={styles.muted}>{correct}/{total} câu đúng</Text></View>; })}<Text style={styles.footnote}>Bản Pro thử nghiệm: báo cáo trên cùng điện thoại; chưa có mã PIN phụ huynh; có thể xuất/nhập bản sao lưu JSON thủ công ở cuối màn này.</Text><Button secondary onPress={() => setScreen('reviewPlan')}>Ôn tập cá nhân hóa và xu hướng</Button><Button secondary onPress={() => setScreen('coach')}>Xem gợi ý gia sư offline</Button><Button secondary onPress={() => setScreen('history')}>Xem lịch sử chi tiết</Button><Button secondary onPress={generateBackup}>Sao lưu / khôi phục dữ liệu</Button></>}
   </ScrollView></SafeAreaView>;
