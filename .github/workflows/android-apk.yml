@@ -1,14 +1,18 @@
-name: Build MathKid V8 Android APK (internal test)
+name: Build MathKid V8.1 Android APK (internal test)
 on:
   push:
     branches:
       - feature/v8-android-offline-release-candidate
+      - feature/v8.1-back-navigation-star-shop
     paths:
       - 'App.js'
       - 'Curriculum.js'
       - 'LearningEngine.js'
       - 'PersonalizedPractice.js'
       - 'ProgressStorage.js'
+      - 'Navigation.js'
+      - 'StarShop.js'
+      - 'tests/**'
       - 'package.json'
       - 'app.json'
       - 'index.js'
@@ -48,7 +52,7 @@ jobs:
       - name: Publish APK as GitHub artifact
         uses: actions/upload-artifact@v4
         with:
-          name: MathKid4-V8-android-internal-apk
+          name: MathKid4-V8.1-starshop-apk
           path: android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
           retention-days: 14

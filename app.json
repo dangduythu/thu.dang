@@ -2,18 +2,18 @@
   "expo": {
     "name": "MathKid 4 Pro",
     "slug": "mathkid4-pro",
-    "version": "8.0.0",
+    "version": "8.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "android": {
       "package": "com.dangduythu.mathkid4pro",
-      "versionCode": 1
+      "versionCode": 2
     },
     "updates": {
       "enabled": false
     },
     "extra": {
-      "note": "V8 Release Candidate; link to your EAS account with eas init before building."
+      "note": "V8.1 internal APK: back navigation and earned-star shop; backup before replacing V8 test build."
     }
   }
 }
