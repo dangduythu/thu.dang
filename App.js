@@ -1,15 +1,17 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator, Alert, Animated, Easing, Keyboard, KeyboardAvoidingView, PanResponder, Platform, Pressable, SafeAreaView,
-  ScrollView, StatusBar, StyleSheet, Text, TextInput, View, useWindowDimensions,
+  ScrollView, Share, StatusBar, StyleSheet, Text, TextInput, View, useWindowDimensions,
 } from 'react-native';
 import Svg, { Circle, Defs, Ellipse, G, LinearGradient, Path, Polygon, Rect, Stop, Text as SvgText } from 'react-native-svg';
 import { useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {CURRICULUM, curriculumFor, getLesson, getNextLesson, BOOK_TOPIC_ORDER} from './Curriculum';
 import {makeLessonCheck, evaluateLearning, recommendLearning} from './LearningEngine';
+import {recentMistakes, topicTrends, dailyReviewPlan} from './PersonalizedPractice';
+import {PROGRESS_KEY, PRE_RESTORE_KEY, normalizeProgress, makeBackup, parseBackup, progressSummary} from './ProgressStorage';
 
-const SAVE_KEY = 'mathkid4_v1_progress'; // Giữ khóa cũ để đọc lại lịch sử V5.
+const SAVE_KEY = PROGRESS_KEY; // Giữ chính xác khóa V5–V7.5 để đọc lịch sử cũ.
 const BOOKS = [
   {id:'general', name:'Kiến thức chung lớp 4'},
   {id:'kntt', name:'Kết nối tri thức với cuộc sống'},
@@ -19,7 +21,7 @@ const BOOKS = [
 // Bản alpha: lựa chọn bộ sách là tùy chọn hồ sơ, CHƯA phải ma trận đề được duyệt theo SGK.
 
 const GREEN = '#168451';
-const APP_VERSION = 'V7.0 Preview · Learning + Adventure';
+const APP_VERSION = 'V8.0 RC · Android Offline';
 const TOPICS = [
   { id: 'numbers', title: 'Số tự nhiên', icon: '🔢', color: '#e6f4ea', description: 'Hàng, lớp, so sánh và làm tròn số', lessons: [
     ['Hàng và lớp', 'Trong số 36 425, chữ số 6 ở hàng nghìn nên có giá trị 6 000.', '36 425 = 30 000 + 6 000 + 400 + 20 + 5.'],
@@ -524,6 +526,7 @@ export default function App() {
   const [backupText,setBackupText]=useState('');
   const [restoreText,setRestoreText]=useState('');
   const [restoreConfirmed,setRestoreConfirmed]=useState(false);
+  const [restoreSummary,setRestoreSummary]=useState(null);
   const [mode, setMode] = useState('practice');
   const [questions, setQuestions] = useState([]);
   const [index, setIndex] = useState(0);
@@ -578,7 +581,8 @@ export default function App() {
         const raw = await AsyncStorage.getItem(SAVE_KEY);
         if (raw) {
           const data = JSON.parse(raw);
-          setProgress({ history: Array.isArray(data.history) ? data.history : [], seen: Array.isArray(data.seen) ? data.seen : [], stars: Number(data.stars) || 0, badges: Array.isArray(data.badges) ? data.badges : [], stages: data.stages && typeof data.stages === 'object' ? data.stages : {}, lessonsDone:Array.isArray(data.lessonsDone)?data.lessonsDone:[], currentLesson:typeof data.currentLesson==='string'?data.currentLesson:null,lessonChecks:data.lessonChecks&&typeof data.lessonChecks==='object'&&!Array.isArray(data.lessonChecks)?data.lessonChecks:{} }); setBook(BOOKS.some(b=>b.id===data.book)?data.book:'general');
+          const migrated=normalizeProgress(data);
+          setProgress(migrated); setBook(BOOKS.some(b=>b.id===migrated.book)?migrated.book:'general');
         }
       } catch (e) { console.warn('Cannot load saved progress:', e); }
       setReady(true);
@@ -586,8 +590,9 @@ export default function App() {
   }, []);
 
   async function save(data) {
-    setProgress(data);
-    try { await AsyncStorage.setItem(SAVE_KEY, JSON.stringify({...data,book:data.book||book})); }
+    const normalized=normalizeProgress({...data,book:data.book||book});
+    setProgress(normalized);
+    try { await AsyncStorage.setItem(SAVE_KEY, JSON.stringify(normalized)); }
     catch (e) { Alert.alert('Lỗi lưu dữ liệu', 'Không thể lưu kết quả. Hãy kiểm tra dung lượng thiết bị.'); }
   }
 
@@ -645,6 +650,16 @@ export default function App() {
     setSessionDone(record); setScreen('result');
   }
 
+  function beginReview(){
+    const wrong=recentMistakes(progress.history,5);
+    if(!wrong.length){setScreen('reviewPlan');return;}
+    const selected=wrong.map(a=>({id:a.id,topic:a.topic,level:a.level||'Khá',question:a.question,
+      answer:a.answer,explanation:a.explanation||'Hãy kiểm tra lại phép tính và đối chiếu đáp án.'}));
+    setMode('review');setTopic(selected[0].topic);setLevel(selected[0].level);
+    setQuestions(selected);setIndex(0);setInput('');setChecked(false);setCorrectCount(0);
+    setAnswers([]);setStartedAt(Date.now());setSessionDone(null);setHintLevel(0);
+    setScreen('quiz');
+  }
   function beginMini(){ setMode('mini');setTopic('fractions');setMiniStep(0);setMiniChoice(null);setMiniTarget(randomInt(4,8));setMiniFinished(false);setMiniCorrect(0);setMiniAnswers([]);setScreen('mini');}
   async function miniNext(){
     if(miniChoice===null)return;
@@ -734,20 +749,44 @@ export default function App() {
     setLessonCheckResult(correct?'correct':'wrong');
   }
   function generateBackup(){
-    const payload={format:'mathkid4-backup',version:1,createdAt:new Date().toISOString(),progress:{...progress,book}};
-    setBackupText(JSON.stringify(payload));setRestoreConfirmed(false);setScreen('backup');
+    const payload=makeBackup(progress,book);
+    setBackupText(JSON.stringify(payload,null,2));
+    setRestoreConfirmed(false);setRestoreSummary(null);setScreen('backup');
+  }
+  async function shareBackup(){
+    try {
+      const payload=backupText || JSON.stringify(makeBackup(progress,book),null,2);
+      await Share.share({title:'Sao lưu MathKid 4 Pro',message:payload});
+    } catch(e){Alert.alert('Không thể chia sẻ','Hãy sao chép văn bản sao lưu bên dưới để lưu riêng.');}
+  }
+  function previewRestore(){
+    try {
+      const restored=parseBackup(restoreText);
+      setRestoreSummary(progressSummary(restored));
+      setRestoreConfirmed(false);
+    }catch(e){setRestoreSummary(null);Alert.alert('Bản sao lưu không hợp lệ',String(e.message||e));}
   }
   async function restoreBackup(){
-    try{
-      const parsed=JSON.parse(restoreText);
-      if(parsed.format!=='mathkid4-backup'||parsed.version!==1||!parsed.progress||!Array.isArray(parsed.progress.history)||!Array.isArray(parsed.progress.seen))throw Error('Định dạng tệp không đúng');
-      if(!restoreConfirmed){Alert.alert('Xác nhận khôi phục','Dữ liệu trong bản sao lưu sẽ thay thế lịch sử hiện tại. Hãy chọn xác nhận trước.');return;}
-      const p=parsed.progress;
-      const restored={...emptyProgress(),...p,history:p.history,seen:p.seen,badges:Array.isArray(p.badges)?p.badges:[],lessonsDone:Array.isArray(p.lessonsDone)?p.lessonsDone:[],lessonChecks:p.lessonChecks&&typeof p.lessonChecks==='object'&&!Array.isArray(p.lessonChecks)?p.lessonChecks:{},stages:p.stages&&typeof p.stages==='object'?p.stages:{},stars:Number(p.stars)||0};
+    if(!restoreConfirmed||!restoreSummary)return;
+    try {
+      const restored=parseBackup(restoreText);
+      // Safety net survives reload and can be used for manual recovery.
+      await AsyncStorage.setItem(PRE_RESTORE_KEY, JSON.stringify(makeBackup(progress,book)));
       await AsyncStorage.setItem(SAVE_KEY,JSON.stringify(restored));
       setProgress(restored);setBook(BOOKS.some(b=>b.id===restored.book)?restored.book:'general');
-      setRestoreText('');setRestoreConfirmed(false);Alert.alert('Đã khôi phục','Đã đọc dữ liệu sao lưu.');setScreen('parent');
-    }catch(e){Alert.alert('Không thể khôi phục','Kiểm tra nội dung sao lưu: '+String(e.message||e));}
+      setRestoreText('');setRestoreSummary(null);setRestoreConfirmed(false);
+      Alert.alert('Khôi phục hoàn tất','Dữ liệu cũ đã được lưu vào bản sao dự phòng trong thiết bị.');
+      setScreen('parent');
+    }catch(e){Alert.alert('Không thể khôi phục','Kiểm tra dữ liệu và dung lượng thiết bị: '+String(e.message||e));}
+  }
+  async function loadPreRestore(){
+    try {
+      const previous=await AsyncStorage.getItem(PRE_RESTORE_KEY);
+      if(!previous){Alert.alert('Chưa có bản dự phòng','Bản này chỉ được tạo khi bạn thực hiện khôi phục dữ liệu.');return;}
+      const p=parseBackup(previous);
+      setRestoreText(previous);setRestoreSummary(progressSummary(p));setRestoreConfirmed(false);
+      Alert.alert('Đã nạp bản dự phòng','Hãy kiểm tra các chỉ số bên dưới và xác nhận nếu muốn khôi phục.');
+    }catch(e){Alert.alert('Không thể đọc bản dự phòng',String(e.message||e));}
   }
   function header(title, back = 'home') {
     return <View style={styles.header}><Pressable onPress={() => setScreen(back)} style={styles.back}><Text style={styles.backText}>‹</Text></Pressable><Text style={styles.headerText}>{title}</Text><View style={{ width: 34 }} /></View>;
@@ -771,7 +810,7 @@ export default function App() {
     </CompactShell>;
   }
   if(ready && screen==='quiz' && q){
-    return <CompactShell title={mode==='game'?'Vượt ải':mode==='test'?'Kiểm tra':'Luyện tập'} onBack={()=>setScreen('home')}
+    return <CompactShell title={mode==='game'?'Vượt ải':mode==='test'?'Kiểm tra':mode==='review'?'Ôn câu từng sai':'Luyện tập'} onBack={()=>setScreen('home')}
       meta={<Text style={styles.progressText}>{index+1}/{questions.length}</Text>}
       actionLabel={!checked?(mode==='test'?'Ghi nhận câu trả lời':'Kiểm tra đáp án'):(index+1===questions.length?'Xem kết quả →':'Câu tiếp theo →')}
       actionDisabled={!checked&&!normalize(input)} onAction={checked?nextQuestion:checkAnswer}>
@@ -804,6 +843,7 @@ export default function App() {
       <View style={styles.hero}><Text style={styles.heroTitle}>Chào nhà toán học nhí! 👋</Text><Text style={styles.heroText}>Sẵn sàng chinh phục thử thách hôm nay?</Text><Text style={styles.heroStars}>⭐ {progress.stars} ngôi sao  ·  ✅ {totalAnswered} câu đã làm</Text></View>
       <View style={styles.grid}>
         <Tile icon="📚" title="Học bài" subtitle="Kiến thức và ví dụ" color="#e6f4ea" onPress={() => setScreen('topics')} />
+        <Tile icon="🧠" title="Ôn tập cá nhân hóa" subtitle="Sửa lỗi sai và xem tiến bộ" color="#f0eafd" onPress={() => setScreen("reviewPlan")} />
         <Tile icon="🧭" title="Gia sư offline" subtitle="Gợi ý theo kết quả thực tế" color="#e8f5ee" onPress={() => setScreen("coach")} />
         <Tile icon="📖" title="Lộ trình 120 thẻ học" subtitle={`${(progress.lessonsDone||[]).length}/120 hoàn thành`} color="#e0f2fe" onPress={() => setScreen('curriculum')} />
         <Tile icon="✏️" title="Luyện tập" subtitle="Câu hỏi mới mỗi lần" color="#eaf1ff" onPress={() => setScreen('choose')} />
@@ -818,7 +858,7 @@ export default function App() {
         <Tile icon="📝" title="Giải toán 3 bước" subtitle="Chấm điểm từng bước" color="#e8e6ff" onPress={startWord} />
         <Tile icon="📘" title="Chọn bộ SGK" subtitle="Cài đặt lộ trình tham khảo" color="#e9f2f9" onPress={() => setScreen('book')} />
       </View>
-      <Text style={styles.footnote}>Bài học và kết quả được lưu trên thiết bị. Bản APK đóng gói đầy đủ có thể học lõi offline; Expo Snack cần kết nối khi tải ban đầu.</Text>
+      <Text style={styles.footnote}>Bài học, trò chơi và kết quả được xử lý trên thiết bị. APK cần được đóng gói và thử nghiệm offline; Expo Snack cần mạng để tải ban đầu.</Text>
     </>}
 
     {screen === 'book' && <>{header('Chọn bộ sách')}<Text style={styles.section}>Con đang sử dụng bộ sách nào?</Text>{BOOKS.map(b=><Pressable key={b.id} onPress={()=>{setBook(b.id);save({...progress,book:b.id});}} style={[styles.choice,book===b.id&&styles.choiceActive]}><Text style={styles.choiceText}>{b.name}</Text><Text>{book===b.id?'✅':'○'}</Text></Pressable>)}<Text style={styles.footnote}>Bộ sách là thiết lập hồ sơ. Thứ tự và ma trận đề chính thức của từng sách chưa được đối chiếu; học theo lộ trình chung 120 thẻ.</Text><Button onPress={()=>setScreen('home')}>Xong</Button></>}
@@ -849,6 +889,32 @@ export default function App() {
 
     {screen === 'dragGame' && <>{header('Kéo thả Toán học')}<DragMatchGame onExit={()=>setScreen('home')} onFinished={finishDrag}/></>}
 
+    {screen === 'reviewPlan' && <>{header('Ôn tập cá nhân hóa')}
+      <Text style={styles.section}>Kế hoạch 15 phút hôm nay</Text>
+      <Text style={styles.muted}>Dựa trên lịch sử trong thiết bị. Không dùng AI hoặc gửi dữ liệu lên mạng.</Text>
+      {dailyReviewPlan(progress.history,progress.lessonsDone||[]).steps.map((step,i)=><View key={i} style={styles.card}>
+        <Text style={styles.rowTitle}>{i+1}. {step.title} · {step.minutes} phút</Text>
+        <Text style={styles.paragraph}>{step.detail}</Text>
+      </View>)}
+      <Text style={styles.section}>Những câu còn cần ôn</Text>
+      {recentMistakes(progress.history,5).length===0?<Text style={styles.muted}>Không còn câu sai chưa được làm đúng lại trong lịch sử. Con có thể luyện câu mới.</Text>:
+        recentMistakes(progress.history,5).map((a,i)=><View key={a.id+'-'+i} style={styles.card}>
+          <Text style={styles.rowTitle}>{i+1}. {a.kind}</Text>
+          <Text style={styles.paragraph}>{a.question}</Text>
+          <Text style={styles.muted}>Câu hỏi đã được đưa vào buổi ôn tập; đáp án chỉ hiện sau khi con trả lời.</Text>
+        </View>)}
+      {recentMistakes(progress.history,5).length>0&&<Button onPress={beginReview}>Làm lại tối đa 5 câu từng sai →</Button>}
+      <Button secondary onPress={()=>{const plan=dailyReviewPlan(progress.history,progress.lessonsDone||[]);
+        begin('practice',plan.topic,plan.level);}}>Luyện thêm chủ đề đề xuất →</Button>
+      <Text style={styles.section}>Tiến bộ theo chủ đề</Text>
+      <Text style={styles.muted}>So sánh tối đa 10 câu gần nhất với 10 câu trước đó. Chỉ hiện xu hướng khi mỗi nhóm có ít nhất 5 câu.</Text>
+      {topicTrends(progress.history).map(t=><View key={t.topic} style={styles.card}>
+        <Text style={styles.rowTitle}>{TOPICS.find(x=>x.id===t.topic)?.title||t.topic} · {t.status}</Text>
+        <Text style={styles.paragraph}>{t.rate===null?'Chưa có dữ liệu':t.correct+'/'+t.sample+' câu đúng gần đây ('+Math.round(t.rate*100)+'%)'}.</Text>
+        <Text style={styles.muted}>{t.change===null?'Chưa đủ dữ liệu để so sánh xu hướng':t.change===0?'Xu hướng ổn định':t.change>0?'Tăng '+t.change+' điểm phần trăm':'Giảm '+Math.abs(t.change)+' điểm phần trăm'}</Text>
+        {t.topMistake&&<Text style={styles.muted}>Dạng cần xem lại: {t.topMistake}</Text>}
+      </View>)}
+    </>}
     {screen === 'coach' && <>{header('Gia sư offline')}
       <Text style={styles.section}>Gợi ý từ lịch sử học tập</Text>
       <Text style={styles.muted}>Phân tích tại thiết bị từ các câu đã làm; không sử dụng AI trực tuyến.</Text>
@@ -890,8 +956,8 @@ export default function App() {
 
     {screen === 'lesson' && <>{header(currentTopic.title, 'topics')}<Text style={styles.section}>Chọn bài học</Text>{currentTopic.lessons.map((l, i) => <Pressable key={i} style={[styles.lessonTab, lessonIndex === i && styles.lessonTabActive]} onPress={() => setLessonIndex(i)}><Text style={[styles.lessonTabText, lessonIndex === i && { color: '#fff' }]}>{i + 1}. {l[0]}</Text></Pressable>)}<View style={styles.card}><Text style={styles.section}>{currentTopic.lessons[lessonIndex][0]}</Text><Text style={styles.paragraph}>{currentTopic.lessons[lessonIndex][1]}</Text><View style={styles.example}><Text style={styles.exampleTitle}>💡 Ví dụ</Text><Text style={styles.paragraph}>{currentTopic.lessons[lessonIndex][2]}</Text></View></View><Button onPress={() => begin('practice', topic, level)}>Luyện tập chủ đề này →</Button></>}
 
-    {screen === 'mistakes' && <>{header('Sổ tay lỗi sai')}<Text style={styles.section}>Các câu con từng làm sai</Text>{progress.history.flatMap(h => h.answers || []).filter(a => !a.correct).length === 0 ? <Text style={styles.muted}>Chưa có câu sai nào trong lịch sử.</Text> : progress.history.flatMap(h => h.answers || []).filter(a => !a.correct).slice(0, 40).map((a,i) => <View key={`${a.id}-${i}`} style={styles.card}><Text style={styles.rowTitle}>{a.question}</Text><Text style={styles.muted}>Con trả lời: {a.userAnswer} · Đúng: {formatNum(a.answer)}</Text><Text style={styles.paragraph}>{a.explanation}</Text></View>)}<Button secondary onPress={() => { const wrong = progress.history.flatMap(h => h.answers || []).filter(a=>!a.correct); if(wrong.length){ setTopic(wrong[0].topic); begin('practice',wrong[0].topic,wrong[0].level); } else setScreen('home'); }}>Luyện lại dạng bài còn yếu →</Button></>}
-    {screen === 'daily' && <>{header('Kế hoạch 15 phút')}<Text style={styles.section}>Lộ trình gợi ý hôm nay</Text><View style={styles.card}><Text style={styles.rowTitle}>📖 3 phút: Ôn kiến thức</Text><Text style={styles.paragraph}>Đọc lại một ví dụ trong chủ đề cần ôn.</Text></View><View style={styles.card}><Text style={styles.rowTitle}>✏️ 9 phút: Luyện 10 câu</Text><Text style={styles.paragraph}>Chủ đề được chọn theo tỷ lệ đúng trong các lượt đã hoàn thành.</Text></View><View style={styles.card}><Text style={styles.rowTitle}>🌟 3 phút: Xem lại lỗi sai</Text><Text style={styles.paragraph}>Đọc lời giải và thử làm lại trên giấy.</Text></View>{(() => { const ranked = TOPICS.map(t => { const st=topicStats(progress.history,t.id); const total=st.total; const good=st.correct; return { t, rate:total?good/total:0.7, total }; }).sort((a,b)=>a.rate-b.rate || b.total-a.total); const weak=ranked.find(x=>x.total>0 && x.rate<0.8); const picked=weak ? weak.t : TOPICS.find(t=>t.id==='add'); return <><Text style={styles.paragraph}>Chủ đề gợi ý: {picked.title}</Text><Button onPress={()=>begin('practice',picked.id,recommendedLevel(progress.history,picked.id))}>Bắt đầu học hôm nay →</Button></>; })()}</>}
+    {screen === 'mistakes' && <>{header('Sổ tay lỗi sai')}<Button secondary onPress={()=>setScreen('reviewPlan')}>Mở buổi ôn tập cá nhân hóa →</Button><Text style={styles.section}>Các câu con từng làm sai</Text>{progress.history.flatMap(h => h.answers || []).filter(a => !a.correct).length === 0 ? <Text style={styles.muted}>Chưa có câu sai nào trong lịch sử.</Text> : progress.history.flatMap(h => h.answers || []).filter(a => !a.correct).slice(0, 40).map((a,i) => <View key={`${a.id}-${i}`} style={styles.card}><Text style={styles.rowTitle}>{a.question}</Text><Text style={styles.muted}>Con trả lời: {a.userAnswer} · Đúng: {formatNum(a.answer)}</Text><Text style={styles.paragraph}>{a.explanation}</Text></View>)}<Button secondary onPress={() => { const wrong = progress.history.flatMap(h => h.answers || []).filter(a=>!a.correct); if(wrong.length){ setTopic(wrong[0].topic); begin('practice',wrong[0].topic,wrong[0].level); } else setScreen('home'); }}>Luyện lại dạng bài còn yếu →</Button></>}
+    {screen === 'daily' && <>{header('Kế hoạch 15 phút')}<Button secondary onPress={()=>setScreen('reviewPlan')}>Kế hoạch ôn theo lỗi sai →</Button><Text style={styles.section}>Lộ trình gợi ý hôm nay</Text><View style={styles.card}><Text style={styles.rowTitle}>📖 3 phút: Ôn kiến thức</Text><Text style={styles.paragraph}>Đọc lại một ví dụ trong chủ đề cần ôn.</Text></View><View style={styles.card}><Text style={styles.rowTitle}>✏️ 9 phút: Luyện 10 câu</Text><Text style={styles.paragraph}>Chủ đề được chọn theo tỷ lệ đúng trong các lượt đã hoàn thành.</Text></View><View style={styles.card}><Text style={styles.rowTitle}>🌟 3 phút: Xem lại lỗi sai</Text><Text style={styles.paragraph}>Đọc lời giải và thử làm lại trên giấy.</Text></View>{(() => { const ranked = TOPICS.map(t => { const st=topicStats(progress.history,t.id); const total=st.total; const good=st.correct; return { t, rate:total?good/total:0.7, total }; }).sort((a,b)=>a.rate-b.rate || b.total-a.total); const weak=ranked.find(x=>x.total>0 && x.rate<0.8); const picked=weak ? weak.t : TOPICS.find(t=>t.id==='add'); return <><Text style={styles.paragraph}>Chủ đề gợi ý: {picked.title}</Text><Button onPress={()=>begin('practice',picked.id,recommendedLevel(progress.history,picked.id))}>Bắt đầu học hôm nay →</Button></>; })()}</>}
     {screen === 'map' && <>{header('Bản đồ chinh phục')}<AdventureTrail stages={progress.stages||{}}/><Text style={styles.section}>5 vùng đất Toán học</Text><Text style={styles.muted}>Đạt ít nhất 1 sao ở ải trước để mở khóa ải tiếp theo. Tiến độ được lưu trên thiết bị.</Text>{WORLDS.map((m,i)=>{const unlocked=i===0||(progress.stages[WORLDS[i-1].id]||0)>0;return <Pressable key={m.id} disabled={!unlocked} style={[styles.card,{backgroundColor:unlocked?(i%2?'#fff5e7':'#eaf6ef'):'#edf0ee',opacity:unlocked?1:.6}]} onPress={()=>{setGameStage(i);setTopic(m.id);setScreen('gameChoose');}}><Text style={styles.rowTitle}>{unlocked?m.icon:'🔒'} Ải {i+1}: {m.name}</Text><Text style={styles.muted}>{unlocked?`5 thử thách · kỷ lục ${progress.stages[m.id]||0}/3 ⭐`:'Hoàn thành ải trước để mở khóa'}</Text></Pressable>})}<Button secondary onPress={beginMini}>🍰 Trò chơi tô phân số (4 lượt)</Button></>}
 
     {screen === 'mini' && <>{header('🍰 Ghép phân số','map')}<Text style={styles.section}>Lượt {miniStep+1}/4 · Tô phân số</Text><Text style={styles.paragraph}>Một hình được chia thành {miniTarget} phần bằng nhau. Con hãy chọn đúng {miniStep+1} phần được tô màu.</Text><View style={styles.fractionRow}>{Array.from({length:miniTarget},(_,i)=><Pressable key={i} onPress={()=>setMiniChoice(miniChoice===i+1?null:i+1)} style={[styles.fractionPiece,{backgroundColor:miniChoice!==null&&i<miniChoice?'#60a5fa':'#e7eee9'}]}><Text style={{color:'#12324a',fontSize:11}}>{i+1}</Text></Pressable>)}</View><Text style={styles.muted}>Chạm vào ô thứ N để tô N phần. Đang chọn: {miniChoice===null?'chưa chọn':`${miniChoice}/${miniTarget}`}</Text><Button disabled={miniChoice===null} onPress={miniNext}>Xác nhận →</Button></>}
@@ -900,23 +966,33 @@ export default function App() {
 
     {screen === 'quiz' && q && <>{header(mode === 'game' ? '🎮 Vượt ải' : mode === 'test' ? '🏆 Kiểm tra' : '✏️ Luyện tập', 'home')}<View style={styles.rowBetween}><Text style={styles.muted}>{mode==='test'&&examKind!=='topic'?'Đề tổng hợp':currentTopic.title} · {level}</Text><Text style={styles.progressText}>Câu {index + 1}/{questions.length}</Text></View><View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${(index + 1) / questions.length * 100}%` }]} /></View><View style={styles.questionCard}><Text style={styles.questionLabel}>TÍNH VÀ ĐIỀN ĐÁP ÁN</Text><Text style={styles.question}>{q.question}</Text><MathIllustration question={q} height={illustrationHeight}/><TextInput style={[styles.answerInput, checked && { borderColor: isCorrect ? GREEN : '#d14b4b' }]} placeholder="Nhập đáp án" placeholderTextColor="#91a09a" keyboardType="number-pad" value={input} onChangeText={setInput} editable={!checked} returnKeyType="done" onSubmitEditing={checkAnswer} accessibilityLabel="Đáp án của con" /><Text style={styles.muted}>Có thể nhập số có hoặc không có dấu cách.</Text></View>{checked && mode !== 'test' && <View style={[styles.feedback, { backgroundColor: isCorrect ? '#e6f4ea' : '#fff0ed' }]}><Text style={styles.feedbackTitle}>{isCorrect ? '🎉 Chính xác! Giỏi lắm!' : `💡 Đáp án đúng: ${formatNum(q.answer)}`}</Text><Text style={styles.paragraph}>{q.explanation}</Text></View>}{!checked && mode !== 'test' && <View style={styles.card}><Button secondary small onPress={() => setHintLevel(v => Math.min(3, v + 1))}>💡 Gợi ý {hintLevel}/3</Button>{hintLevel > 0 && <Text style={styles.paragraph}>{hintLevel === 1 ? 'Đọc kỹ đề bài: con cần tìm giá trị nào? Hãy nhớ quy tắc đã học trong chủ đề này.' : hintLevel === 2 ? 'Hãy viết phép tính ra giấy và kiểm tra từng bước trước khi điền đáp án.' : q.explanation}</Text>}</View>}{!checked ? <Button disabled={!normalize(input)} onPress={checkAnswer}>{mode === 'test' ? 'Ghi nhận câu trả lời' : 'Kiểm tra đáp án'}</Button> : <Button onPress={nextQuestion}>{index + 1 === questions.length ? 'Xem kết quả →' : 'Câu tiếp theo →'}</Button>}<Text style={styles.footnote}>Nếu con làm sai, hãy đọc lời giải trước khi tiếp tục.</Text></>}
 
-    {screen === 'result' && sessionDone && <>{header('Kết quả')}<View style={styles.resultCard}><Text style={styles.resultEmoji}>{sessionDone.correct / sessionDone.total >= .8 ? '🏆' : '🌈'}</Text><Text style={styles.section}>Con đã hoàn thành!</Text><Text style={styles.bigScore}>{sessionDone.score.toFixed(1).replace('.', ',')}/10</Text><Text style={styles.paragraph}>{sessionDone.correct}/{sessionDone.total} câu đúng</Text>{(mode === 'game'||mode==='mini'||mode==='shark'||mode==='drag') && <Text style={styles.heroStars}>+ {sessionDone.stars} ⭐</Text>}</View>{sessionDone.answers.filter(a => mode === 'test' || !a.correct).length > 0 && <><Text style={styles.section}>{mode === 'test' ? 'Đáp án và lời giải' : 'Câu cần ôn lại'}</Text>{sessionDone.answers.filter(a => mode === 'test' || !a.correct).map((a, i) => <View key={i} style={styles.card}><Text style={styles.rowTitle}>{a.question}</Text><Text style={styles.muted}>Con trả lời: {a.userAnswer} · Đúng: {formatNum(a.answer)} {a.correct ? '✅' : '❌'}</Text><Text style={styles.paragraph}>{a.explanation}</Text></View>)}</>}<Button onPress={() => mode==='mini'?beginMini():mode==='shark'?startShark():mode==='drag'?startMatch():begin(mode,topic,level)}>Làm lượt mới</Button><Button secondary onPress={() => setScreen('home')}>Về trang chủ</Button></>}
+    {screen === 'result' && sessionDone && <>{header('Kết quả')}<View style={styles.resultCard}><Text style={styles.resultEmoji}>{sessionDone.correct / sessionDone.total >= .8 ? '🏆' : '🌈'}</Text><Text style={styles.section}>Con đã hoàn thành!</Text><Text style={styles.bigScore}>{sessionDone.score.toFixed(1).replace('.', ',')}/10</Text><Text style={styles.paragraph}>{sessionDone.correct}/{sessionDone.total} câu đúng</Text>{(mode === 'game'||mode==='mini'||mode==='shark'||mode==='drag') && <Text style={styles.heroStars}>+ {sessionDone.stars} ⭐</Text>}</View>{sessionDone.answers.filter(a => mode === 'test' || !a.correct).length > 0 && <><Text style={styles.section}>{mode === 'test' ? 'Đáp án và lời giải' : 'Câu cần ôn lại'}</Text>{sessionDone.answers.filter(a => mode === 'test' || !a.correct).map((a, i) => <View key={i} style={styles.card}><Text style={styles.rowTitle}>{a.question}</Text><Text style={styles.muted}>Con trả lời: {a.userAnswer} · Đúng: {formatNum(a.answer)} {a.correct ? '✅' : '❌'}</Text><Text style={styles.paragraph}>{a.explanation}</Text></View>)}</>}<Button onPress={() => mode==='mini'?beginMini():mode==='shark'?startShark():mode==='drag'?startMatch():mode==='review'?beginReview():begin(mode,topic,level)}>Làm lượt mới</Button><Button secondary onPress={() => setScreen('home')}>Về trang chủ</Button></>}
 
-    {screen === 'history' && <>{header('Thành tích')}<View style={styles.stats}><View><Text style={styles.statNumber}>{progress.history.length}</Text><Text style={styles.muted}>Lượt học</Text></View><View><Text style={styles.statNumber}>{average}%</Text><Text style={styles.muted}>Tỷ lệ đúng</Text></View><View><Text style={styles.statNumber}>{progress.stars}</Text><Text style={styles.muted}>Ngôi sao</Text></View></View><Text style={styles.section}>Huy hiệu đã nhận</Text><Text style={styles.paragraph}>{(progress.badges||[]).length?(progress.badges||[]).map(b=>'🏅 '+b).join(' · '):'Hoàn thành các thử thách để nhận huy hiệu.'}</Text><Text style={styles.section}>Lịch sử gần đây</Text>{progress.history.length === 0 ? <Text style={styles.muted}>Chưa có kết quả. Hãy làm một lượt bài tập nhé!</Text> : progress.history.slice(0, 30).map(h => <Pressable key={h.id} style={styles.card} onPress={() => { setSessionDone(h); setScreen('pastResult'); }}><Text style={styles.rowTitle}>{TOPICS.find(t => t.id === h.topic)?.title || h.topic} · {h.level}</Text><Text style={styles.muted}>{new Date(h.date).toLocaleString('vi-VN')} · {(h.mode === 'game'||h.mode==='mini') ? 'Trò chơi' : h.mode === 'test' ? 'Kiểm tra' : h.mode==='shark'?'Vượt biển':h.mode==='drag'?'Kéo thả':h.mode==='steps'?'Toán nhiều bước':'Luyện tập'}</Text><Text style={styles.progressText}>{h.correct}/{h.total} đúng · {h.score.toFixed(1).replace('.', ',')}/10</Text></Pressable>)}</>}
+    {screen === 'history' && <>{header('Thành tích')}<View style={styles.stats}><View><Text style={styles.statNumber}>{progress.history.length}</Text><Text style={styles.muted}>Lượt học</Text></View><View><Text style={styles.statNumber}>{average}%</Text><Text style={styles.muted}>Tỷ lệ đúng</Text></View><View><Text style={styles.statNumber}>{progress.stars}</Text><Text style={styles.muted}>Ngôi sao</Text></View></View><Text style={styles.section}>Huy hiệu đã nhận</Text><Text style={styles.paragraph}>{(progress.badges||[]).length?(progress.badges||[]).map(b=>'🏅 '+b).join(' · '):'Hoàn thành các thử thách để nhận huy hiệu.'}</Text><Text style={styles.section}>Lịch sử gần đây</Text>{progress.history.length === 0 ? <Text style={styles.muted}>Chưa có kết quả. Hãy làm một lượt bài tập nhé!</Text> : progress.history.slice(0, 30).map(h => <Pressable key={h.id} style={styles.card} onPress={() => { setSessionDone(h); setScreen('pastResult'); }}><Text style={styles.rowTitle}>{TOPICS.find(t => t.id === h.topic)?.title || h.topic} · {h.level}</Text><Text style={styles.muted}>{new Date(h.date).toLocaleString('vi-VN')} · {(h.mode === 'game'||h.mode==='mini') ? 'Trò chơi' : h.mode === 'test' ? 'Kiểm tra' : h.mode==='shark'?'Vượt biển':h.mode==='drag'?'Kéo thả':h.mode==='steps'?'Toán nhiều bước':h.mode==='review'?'Ôn lỗi sai':'Luyện tập'}</Text><Text style={styles.progressText}>{h.correct}/{h.total} đúng · {h.score.toFixed(1).replace('.', ',')}/10</Text></Pressable>)}</>}
 
     {screen === 'pastResult' && sessionDone && <>{header('Chi tiết lượt học', 'history')}<Text style={styles.section}>{sessionDone.correct}/{sessionDone.total} đúng · {sessionDone.score.toFixed(1).replace('.', ',')}/10</Text>{sessionDone.answers.map((a, i) => <View key={i} style={styles.card}><Text style={styles.rowTitle}>{i + 1}. {a.question} {a.correct ? '✅' : '❌'}</Text><Text style={styles.muted}>Con trả lời: {a.userAnswer} · Đáp án: {formatNum(a.answer)}</Text><Text style={styles.paragraph}>{a.explanation}</Text></View>)}</>}
 
     {screen === 'backup' && <>{header('Sao lưu dữ liệu','parent')}
-      <Text style={styles.section}>Sao lưu bằng văn bản JSON</Text>
-      <Text style={styles.muted}>Chạm giữ để chọn và sao chép toàn bộ nội dung bên dưới vào tệp văn bản riêng. Không gửi dữ liệu học tập cho người lạ.</Text>
+      <Text style={styles.section}>Sao lưu offline · V8</Text>
+      <Text style={styles.muted}>Sao lưu lưu lịch sử, sao, huy hiệu và 120 thẻ. Chọn Chia sẻ để lưu nội dung JSON ra ứng dụng khác hoặc chạm giữ để sao chép. Không có đồng bộ đám mây tự động.</Text>
+      <View style={styles.card}><Text style={styles.rowTitle}>Dữ liệu hiện có</Text>
+        <Text style={styles.paragraph}>{progressSummary(progress).sessions} lượt học · {progressSummary(progress).answered} câu · {progress.stars} sao · {progressSummary(progress).lessons} thẻ</Text>
+        <Button onPress={shareBackup}>Chia sẻ bản sao lưu JSON →</Button>
+      </View>
       <Text selectable style={[styles.paragraph,{backgroundColor:'#fff',padding:12,borderRadius:12}]}>{backupText}</Text>
-      <Text style={styles.section}>Khôi phục bản sao lưu</Text>
-      <TextInput multiline style={[styles.answerInput,{minHeight:110,textAlignVertical:'top'}]} placeholder="Dán toàn bộ JSON sao lưu vào đây" value={restoreText} onChangeText={setRestoreText}/>
-      <Pressable style={styles.choice} onPress={()=>setRestoreConfirmed(v=>!v)}><Text style={styles.choiceText}>{restoreConfirmed?'☑':'□'} Tôi hiểu việc khôi phục sẽ thay thế lịch sử hiện tại</Text></Pressable>
-      <Button disabled={!restoreConfirmed||!restoreText.trim()} onPress={restoreBackup}>Khôi phục dữ liệu đã sao lưu</Button>
-      <Text style={styles.footnote}>Đây là bản sao lưu thủ công, chưa có đồng bộ đám mây hoặc chọn tệp trực tiếp.</Text>
+      <Text style={styles.section}>Khôi phục và bảo vệ dữ liệu</Text>
+      <Text style={styles.muted}>Dán bản sao lưu V6.5/V7/V8. Ứng dụng kiểm tra trước khi ghi đè và tạo bản dự phòng trong máy.</Text>
+      <TextInput multiline style={[styles.answerInput,{minHeight:110,textAlignVertical:'top'}]} placeholder="Dán toàn bộ JSON sao lưu vào đây" value={restoreText} onChangeText={s=>{setRestoreText(s);setRestoreSummary(null);setRestoreConfirmed(false);}}/>
+      <Button secondary disabled={!restoreText.trim()} onPress={previewRestore}>Kiểm tra bản sao lưu</Button>
+      {restoreSummary&&<View style={styles.card}><Text style={styles.rowTitle}>Bản sao lưu sắp khôi phục</Text>
+        <Text style={styles.paragraph}>{restoreSummary.sessions} lượt · {restoreSummary.answered} câu · {restoreSummary.stars} sao · {restoreSummary.lessons} thẻ</Text>
+        <Pressable style={styles.choice} onPress={()=>setRestoreConfirmed(v=>!v)}><Text style={styles.choiceText}>{restoreConfirmed?'☑':'□'} Tôi đồng ý thay thế dữ liệu hiện tại sau khi đã xem các chỉ số</Text></Pressable>
+        <Button disabled={!restoreConfirmed} onPress={restoreBackup}>Xác nhận khôi phục →</Button>
+      </View>}
+      <Button secondary onPress={loadPreRestore}>Nạp bản dự phòng trước lần khôi phục gần nhất</Button>
+      <Text style={styles.footnote}>Dữ liệu lưu tại thiết bị/trình duyệt đang dùng. Cài APK mới không tự chuyển dữ liệu từ Snack sang ứng dụng Android; hãy sao lưu trên Snack rồi nhập vào APK. Cài lại hoặc xóa dữ liệu ứng dụng sẽ làm mất dữ liệu chưa xuất ra ngoài.</Text>
     </>}
-    {screen === 'parent' && <>{header('Góc bố mẹ')}<Text style={styles.section}>Báo cáo học tập</Text><View style={styles.stats}><View><Text style={styles.statNumber}>{totalAnswered}</Text><Text style={styles.muted}>Câu đã làm</Text></View><View><Text style={styles.statNumber}>{average}%</Text><Text style={styles.muted}>Tỷ lệ đúng</Text></View><View><Text style={styles.statNumber}>{progress.history.length}</Text><Text style={styles.muted}>Lượt học</Text></View></View><Text style={styles.section}>Độ khó gợi ý cho buổi tiếp theo</Text>{TOPICS.map(t=><Text key={t.id} style={styles.muted}>{t.icon} {t.title}: {recommendedLevel(progress.history,t.id)} ({topicStats(progress.history,t.id).total} câu đã ghi nhận)</Text>)}<Text style={styles.section}>Kết quả theo chủ đề</Text>{TOPICS.map(t => { const st=topicStats(progress.history,t.id); const total=st.total; const correct=st.correct; const pct = total ? Math.round(correct / total * 100) : 0; return <View key={t.id} style={styles.card}><View style={styles.rowBetween}><Text style={styles.rowTitle}>{t.icon} {t.title}</Text><Text style={styles.progressText}>{total ? pct + '%' : 'Chưa học'}</Text></View><View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${pct}%` }]} /></View><Text style={styles.muted}>{correct}/{total} câu đúng</Text></View>; })}<Text style={styles.footnote}>Bản Pro thử nghiệm: báo cáo trên cùng điện thoại; chưa có mã PIN phụ huynh; có thể xuất/nhập bản sao lưu JSON thủ công ở cuối màn này.</Text><Button secondary onPress={() => setScreen('coach')}>Xem gợi ý gia sư offline</Button><Button secondary onPress={() => setScreen('history')}>Xem lịch sử chi tiết</Button><Button secondary onPress={generateBackup}>Sao lưu / khôi phục dữ liệu</Button></>}
+    {screen === 'parent' && <>{header('Góc bố mẹ')}<Text style={styles.section}>Báo cáo học tập</Text><View style={styles.stats}><View><Text style={styles.statNumber}>{totalAnswered}</Text><Text style={styles.muted}>Câu đã làm</Text></View><View><Text style={styles.statNumber}>{average}%</Text><Text style={styles.muted}>Tỷ lệ đúng</Text></View><View><Text style={styles.statNumber}>{progress.history.length}</Text><Text style={styles.muted}>Lượt học</Text></View></View><Text style={styles.section}>Độ khó gợi ý cho buổi tiếp theo</Text>{TOPICS.map(t=><Text key={t.id} style={styles.muted}>{t.icon} {t.title}: {recommendedLevel(progress.history,t.id)} ({topicStats(progress.history,t.id).total} câu đã ghi nhận)</Text>)}<Text style={styles.section}>Kết quả theo chủ đề</Text>{TOPICS.map(t => { const st=topicStats(progress.history,t.id); const total=st.total; const correct=st.correct; const pct = total ? Math.round(correct / total * 100) : 0; return <View key={t.id} style={styles.card}><View style={styles.rowBetween}><Text style={styles.rowTitle}>{t.icon} {t.title}</Text><Text style={styles.progressText}>{total ? pct + '%' : 'Chưa học'}</Text></View><View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${pct}%` }]} /></View><Text style={styles.muted}>{correct}/{total} câu đúng</Text></View>; })}<Text style={styles.footnote}>Bản Pro thử nghiệm: báo cáo trên cùng điện thoại; chưa có mã PIN phụ huynh; có thể xuất/nhập bản sao lưu JSON thủ công ở cuối màn này.</Text><Button secondary onPress={() => setScreen('reviewPlan')}>Ôn tập cá nhân hóa và xu hướng</Button><Button secondary onPress={() => setScreen('coach')}>Xem gợi ý gia sư offline</Button><Button secondary onPress={() => setScreen('history')}>Xem lịch sử chi tiết</Button><Button secondary onPress={generateBackup}>Sao lưu / khôi phục dữ liệu</Button></>}
   </ScrollView></SafeAreaView>;
 }
 

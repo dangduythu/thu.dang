@@ -1,0 +1,54 @@
+name: Build MathKid V8 Android APK (internal test)
+on:
+  push:
+    branches:
+      - feature/v8-android-offline-release-candidate
+    paths:
+      - 'App.js'
+      - 'Curriculum.js'
+      - 'LearningEngine.js'
+      - 'PersonalizedPractice.js'
+      - 'ProgressStorage.js'
+      - 'package.json'
+      - 'app.json'
+      - 'index.js'
+      - '.github/workflows/android-apk.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  android-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Align Expo SDK dependencies
+        run: npx expo install --fix
+      - name: Verify matching Expo dependencies
+        run: npx expo install --check
+      - name: Run regression tests
+        run: npm test
+      - name: Generate Android project
+        run: npx expo prebuild --platform android --non-interactive --clean
+      - name: Bundle application and compile installable APK
+        working-directory: android
+        run: chmod +x gradlew && ./gradlew :app:assembleRelease --no-daemon --stacktrace
+      - name: Publish APK as GitHub artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MathKid4-V8-android-internal-apk
+          path: android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 14
