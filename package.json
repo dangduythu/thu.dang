@@ -1,6 +1,6 @@
 {
   "name": "mathkid4-pro",
-  "version": "8.1.0-rc.1",
+  "version": "8.2.0-rc.1",
   "private": true,
   "main": "index.js",
   "scripts": {
@@ -8,7 +8,10 @@
     "android": "expo start --android",
     "web": "expo start --web",
     "check": "expo install --check",
-    "test": "node --test"
+    "test": "node --test",
+    "build:web": "expo export --platform web --output-dir dist",
+    "desktop:dev": "npm run build:web && electron desktop/main.cjs",
+    "desktop:package": "npm run build:web && electron-builder --win portable --publish never"
   },
   "dependencies": {
     "expo": "~54.0.0",
@@ -17,6 +20,41 @@
     "react-dom": "19.1.0",
     "react-native-web": "~0.21.0",
     "react-native-svg": "15.12.1",
-    "@react-native-async-storage/async-storage": "2.2.0"
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "@expo/metro-runtime": "~6.1.0"
+  },
+  "devDependencies": {
+    "electron": "^37.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "com.dangduythu.mathkid4pro.windows",
+    "productName": "MathKid 4 Pro",
+    "directories": {
+      "output": "dist-desktop"
+    },
+    "files": [
+      "dist/**/*",
+      "desktop/**/*",
+      "package.json",
+      "!**/*.map",
+      "!node_modules/**/*"
+    ],
+    "extraMetadata": {
+      "main": "desktop/main.cjs"
+    },
+    "asar": true,
+    "npmRebuild": false,
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "MathKid4-V8.2-Windows-${version}-${arch}.${ext}"
+    }
   }
 }

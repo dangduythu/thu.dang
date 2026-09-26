@@ -23,7 +23,8 @@ const BOOKS = [
 // Bản alpha: lựa chọn bộ sách là tùy chọn hồ sơ, CHƯA phải ma trận đề được duyệt theo SGK.
 
 const GREEN = '#168451';
-const APP_VERSION = 'V8.1 Preview · Star Shop';
+const APP_VERSION = 'V8.2 Preview · Windows & Android';
+const desktopBridge = () => Platform.OS==='web' && typeof window!=='undefined' ? window.mathkidDesktop : null;
 const TOPICS = [
   { id: 'numbers', title: 'Số tự nhiên', icon: '🔢', color: '#e6f4ea', description: 'Hàng, lớp, so sánh và làm tròn số', lessons: [
     ['Hàng và lớp', 'Trong số 36 425, chữ số 6 ở hàng nghìn nên có giá trị 6 000.', '36 425 = 30 000 + 6 000 + 400 + 20 + 5.'],
@@ -529,6 +530,7 @@ export default function App() {
   const [lessonCheckInput,setLessonCheckInput]=useState('');
   const [lessonCheckResult,setLessonCheckResult]=useState(null);
   const [backupText,setBackupText]=useState('');
+  const [backupNotice,setBackupNotice]=useState('');
   const [restoreText,setRestoreText]=useState('');
   const [restoreConfirmed,setRestoreConfirmed]=useState(false);
   const [restoreSummary,setRestoreSummary]=useState(null);
@@ -795,14 +797,33 @@ export default function App() {
   }
   function generateBackup(){
     const payload=makeBackup(progress,book);
-    setBackupText(JSON.stringify(payload,null,2));
+    setBackupText(JSON.stringify(payload,null,2));setBackupNotice('');
     setRestoreConfirmed(false);setRestoreSummary(null);setScreen('backup');
   }
   async function shareBackup(){
     try {
       const payload=backupText || JSON.stringify(makeBackup(progress,book),null,2);
+      const desktop=desktopBridge();
+      if(desktop){
+        const result=await desktop.saveBackup(payload);
+        if(!result.cancelled)setBackupNotice('Đã lưu bản sao lưu JSON. Hãy giữ tệp ở nơi an toàn.');
+        return;
+      }
       await Share.share({title:'Sao lưu MathKid 4 Pro',message:payload});
     } catch(e){Alert.alert('Không thể chia sẻ','Hãy sao chép văn bản sao lưu bên dưới để lưu riêng.');}
+  }
+  async function openDesktopBackup(){
+    const desktop=desktopBridge();
+    if(!desktop)return;
+    try{
+      const result=await desktop.openBackup();
+      if(result.cancelled)return;
+      const parsed=parseBackup(result.text);
+      setRestoreText(result.text);
+      setRestoreSummary(progressSummary(parsed));
+      setRestoreConfirmed(false);
+      setBackupNotice('Đã đọc tệp JSON. Hãy xem các chỉ số và xác nhận trước khi khôi phục.');
+    }catch(e){setRestoreSummary(null);setBackupNotice('Không thể mở bản sao lưu: '+String(e.message||e));}
   }
   function previewRestore(){
     try {
@@ -882,7 +903,7 @@ export default function App() {
   }
 
   if (!ready) return <SafeAreaView style={styles.root}><ActivityIndicator color={GREEN} size="large" style={{ marginTop: 80 }} /></SafeAreaView>;
-  return <SafeAreaView style={styles.root}><StatusBar barStyle="dark-content" backgroundColor="#f7faf8" /><ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.page,Platform.OS==='android'&&{paddingTop:(StatusBar.currentHeight||24)+12}]}>
+  return <SafeAreaView style={styles.root}><StatusBar barStyle="dark-content" backgroundColor="#f7faf8" /><ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.page,Platform.OS==='android'&&{paddingTop:(StatusBar.currentHeight||24)+12},Platform.OS==='web'&&viewportHeight>690&&{maxWidth:900,paddingHorizontal:26}]}>
     {screen === 'home' && <>
       <Text style={styles.brand}>🌟 MathKid 4 · {APP_VERSION}</Text><Text style={styles.muted}>Mỗi ngày một chút – Giỏi Toán từng bước</Text>
       <View style={styles.hero}><Text style={styles.heroTitle}>{getReward(progress.equippedReward)?.icon||'🌟'} Chào nhà toán học nhí! 👋</Text><Text style={styles.heroText}>Sẵn sàng chinh phục thử thách hôm nay?</Text><Text style={styles.heroStars}>⭐ {availableStars(progress)} sao để đổi quà · 🏅 {progress.stars} sao đã kiếm · ✅ {totalAnswered} câu</Text></View>
@@ -1044,11 +1065,13 @@ export default function App() {
       <Text style={styles.muted}>Sao lưu lưu lịch sử, sao, huy hiệu và 120 thẻ. Chọn Chia sẻ để lưu nội dung JSON ra ứng dụng khác hoặc chạm giữ để sao chép. Không có đồng bộ đám mây tự động.</Text>
       <View style={styles.card}><Text style={styles.rowTitle}>Dữ liệu hiện có</Text>
         <Text style={styles.paragraph}>{progressSummary(progress).sessions} lượt học · {progressSummary(progress).answered} câu · {progress.stars} sao · {progressSummary(progress).lessons} thẻ</Text>
-        <Button onPress={shareBackup}>Chia sẻ bản sao lưu JSON →</Button>
+        <Button onPress={shareBackup}>{desktopBridge()?'Lưu JSON thành tệp trên máy tính →':'Chia sẻ bản sao lưu JSON →'}</Button>
+        {backupNotice?<Text style={styles.paragraph}>{backupNotice}</Text>:null}
       </View>
       <Text selectable style={[styles.paragraph,{backgroundColor:'#fff',padding:12,borderRadius:12}]}>{backupText}</Text>
       <Text style={styles.section}>Khôi phục và bảo vệ dữ liệu</Text>
       <Text style={styles.muted}>Dán bản sao lưu V6.5/V7/V8. Ứng dụng kiểm tra trước khi ghi đè và tạo bản dự phòng trong máy.</Text>
+      {desktopBridge()?<Button secondary onPress={openDesktopBackup}>Mở tệp JSON từ máy tính →</Button>:null}
       <TextInput multiline style={[styles.answerInput,{minHeight:110,textAlignVertical:'top'}]} placeholder="Dán toàn bộ JSON sao lưu vào đây" value={restoreText} onChangeText={s=>{setRestoreText(s);setRestoreSummary(null);setRestoreConfirmed(false);}}/>
       <Button secondary disabled={!restoreText.trim()} onPress={previewRestore}>Kiểm tra bản sao lưu</Button>
       {restoreSummary&&<View style={styles.card}><Text style={styles.rowTitle}>Bản sao lưu sắp khôi phục</Text>
@@ -1057,7 +1080,7 @@ export default function App() {
         <Button disabled={!restoreConfirmed} onPress={restoreBackup}>Xác nhận khôi phục →</Button>
       </View>}
       <Button secondary onPress={loadPreRestore}>Nạp bản dự phòng trước lần khôi phục gần nhất</Button>
-      <Text style={styles.footnote}>Dữ liệu lưu tại thiết bị/trình duyệt đang dùng. Cài APK mới không tự chuyển dữ liệu từ Snack sang ứng dụng Android; hãy sao lưu trên Snack rồi nhập vào APK. Cài lại hoặc xóa dữ liệu ứng dụng sẽ làm mất dữ liệu chưa xuất ra ngoài.</Text>
+      <Text style={styles.footnote}>Dữ liệu trên Windows, Android và Expo Snack được lưu riêng. Muốn chuyển máy, hãy xuất JSON ở máy cũ và nhập vào máy mới. Luôn lưu bản JSON bên ngoài ứng dụng trước khi gỡ hoặc cài lại.</Text>
     </>}
     {screen === 'parent' && <>{header('Góc bố mẹ')}<Text style={styles.muted}>Sao tích lũy: {progress.stars} · Đã dùng: {progress.starSpent||0} · Còn lại: {availableStars(progress)} · Quà mở khóa: {(progress.ownedRewards||[]).length}</Text><Text style={styles.section}>Báo cáo học tập</Text><View style={styles.stats}><View><Text style={styles.statNumber}>{totalAnswered}</Text><Text style={styles.muted}>Câu đã làm</Text></View><View><Text style={styles.statNumber}>{average}%</Text><Text style={styles.muted}>Tỷ lệ đúng</Text></View><View><Text style={styles.statNumber}>{progress.history.length}</Text><Text style={styles.muted}>Lượt học</Text></View></View><Text style={styles.section}>Độ khó gợi ý cho buổi tiếp theo</Text>{TOPICS.map(t=><Text key={t.id} style={styles.muted}>{t.icon} {t.title}: {recommendedLevel(progress.history,t.id)} ({topicStats(progress.history,t.id).total} câu đã ghi nhận)</Text>)}<Text style={styles.section}>Kết quả theo chủ đề</Text>{TOPICS.map(t => { const st=topicStats(progress.history,t.id); const total=st.total; const correct=st.correct; const pct = total ? Math.round(correct / total * 100) : 0; return <View key={t.id} style={styles.card}><View style={styles.rowBetween}><Text style={styles.rowTitle}>{t.icon} {t.title}</Text><Text style={styles.progressText}>{total ? pct + '%' : 'Chưa học'}</Text></View><View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${pct}%` }]} /></View><Text style={styles.muted}>{correct}/{total} câu đúng</Text></View>; })}<Text style={styles.footnote}>Bản Pro thử nghiệm: báo cáo trên cùng điện thoại; chưa có mã PIN phụ huynh; có thể xuất/nhập bản sao lưu JSON thủ công ở cuối màn này.</Text><Button secondary onPress={() => setScreen('reviewPlan')}>Ôn tập cá nhân hóa và xu hướng</Button><Button secondary onPress={() => setScreen('coach')}>Xem gợi ý gia sư offline</Button><Button secondary onPress={() => setScreen('history')}>Xem lịch sử chi tiết</Button><Button secondary onPress={generateBackup}>Sao lưu / khôi phục dữ liệu</Button></>}
   </ScrollView></SafeAreaView>;

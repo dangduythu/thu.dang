@@ -1,0 +1,53 @@
+name: Build MathKid V8.2 Windows EXE (internal test)
+on:
+  push:
+    branches:
+      - feature/v8.2-windows-exe
+    paths:
+      - 'App.js'
+      - 'Curriculum.js'
+      - 'LearningEngine.js'
+      - 'PersonalizedPractice.js'
+      - 'ProgressStorage.js'
+      - 'Navigation.js'
+      - 'StarShop.js'
+      - 'desktop/**'
+      - 'tests/**'
+      - 'package.json'
+      - 'app.json'
+      - '.github/workflows/windows-exe.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-exe:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Align Expo SDK dependencies
+        run: npx expo install --fix
+      - name: Verify Expo dependencies
+        run: npx expo install --check
+      - name: Run all regression tests
+        run: npm test
+      - name: Export MathKid offline Web bundle
+        run: npm run build:web
+      - name: Package portable Windows EXE
+        run: npx electron-builder --win portable --x64 --publish never
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: MathKid4-V8.2-Windows-EXE
+          path: dist-desktop/*.exe
+          if-no-files-found: error
+          retention-days: 14

@@ -2,7 +2,7 @@
   "expo": {
     "name": "MathKid 4 Pro",
     "slug": "mathkid4-pro",
-    "version": "8.1.0",
+    "version": "8.2.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "android": {
@@ -13,7 +13,12 @@
       "enabled": false
     },
     "extra": {
-      "note": "V8.1 internal APK: back navigation and earned-star shop; backup before replacing V8 test build."
+      "note": "V8.2 Windows desktop RC. Windows and Android progress transfer is manual via JSON backup."
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "name": "MathKid 4 Pro"
     }
   }
 }
