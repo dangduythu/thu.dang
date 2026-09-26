@@ -12,6 +12,7 @@ import {recentMistakes, topicTrends, dailyReviewPlan} from './PersonalizedPracti
 import {PROGRESS_KEY, PRE_RESTORE_KEY, normalizeProgress, makeBackup, parseBackup, progressSummary} from './ProgressStorage';
 import {backDestination} from './Navigation';
 import {STAR_REWARDS, availableStars, getReward, purchaseReward, equipReward} from './StarShop';
+import {EXERCISE_BANK, BANK_GROUPS, chooseExercises, groupStats} from './ExerciseBank';
 
 const SAVE_KEY = PROGRESS_KEY; // Giữ chính xác khóa V5–V7.5 để đọc lịch sử cũ.
 const BOOKS = [
@@ -23,7 +24,7 @@ const BOOKS = [
 // Bản alpha: lựa chọn bộ sách là tùy chọn hồ sơ, CHƯA phải ma trận đề được duyệt theo SGK.
 
 const GREEN = '#168451';
-const APP_VERSION = 'V8.2 Preview · Windows & Android';
+const APP_VERSION = 'V8.3 Preview · Kho bài tập';
 const desktopBridge = () => Platform.OS==='web' && typeof window!=='undefined' ? window.mathkidDesktop : null;
 const TOPICS = [
   { id: 'numbers', title: 'Số tự nhiên', icon: '🔢', color: '#e6f4ea', description: 'Hàng, lớp, so sánh và làm tròn số', lessons: [
@@ -522,6 +523,9 @@ export default function App() {
   const [ready, setReady] = useState(false);
   const [screen, setScreen] = useState('home');
   const [shopMessage,setShopMessage] = useState('');
+  const [bankGroup,setBankGroup] = useState('all');
+  const [bankLevel,setBankLevel] = useState('Tất cả');
+  const [bankCount,setBankCount] = useState(10);
   const shopSaving = useRef(false);
   const [topic, setTopic] = useState('add');
   const [level, setLevel] = useState('Khá');
@@ -657,7 +661,7 @@ export default function App() {
     if (index + 1 < questions.length) {
       setIndex(index + 1); setInput(''); setChecked(false); setHintLevel(0); return;
     }
-    const stars = mode === 'game' ? gameStars(correctCount, questions.length) : 0;
+    const stars = mode === 'game' || mode === 'bank' ? gameStars(correctCount, questions.length) : 0;
     const record = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       date: new Date().toISOString(), mode, topic, level, total: questions.length,
@@ -671,6 +675,14 @@ export default function App() {
     setSessionDone(record); setScreen('result');
   }
 
+  function beginBank(){
+    const picked=chooseExercises(bankGroup,bankLevel,bankCount,progress.history);
+    if(!picked.length){Alert.alert('Chưa có bài phù hợp','Hãy chọn nhóm kiến thức hoặc độ khó khác.');return;}
+    setMode('bank');setTopic(picked[0].topic);setLevel(bankLevel);
+    setQuestions(picked);setIndex(0);setInput('');setChecked(false);setCorrectCount(0);
+    setAnswers([]);setStartedAt(Date.now());setSessionDone(null);setHintLevel(0);
+    setScreen('quiz');
+  }
   function beginReview(){
     const wrong=recentMistakes(progress.history,5);
     if(!wrong.length){setScreen('reviewPlan');return;}
@@ -876,11 +888,11 @@ export default function App() {
     </CompactShell>;
   }
   if(ready && screen==='quiz' && q){
-    return <CompactShell title={mode==='game'?'Vượt ải':mode==='test'?'Kiểm tra':mode==='review'?'Ôn câu từng sai':'Luyện tập'} onBack={()=>setScreen('home')} onHome={()=>setScreen('home')}
+    return <CompactShell title={mode==='game'?'Vượt ải':mode==='test'?'Kiểm tra':mode==='review'?'Ôn câu từng sai':mode==='bank'?'Kho 1.000 bài':'Luyện tập'} onBack={()=>setScreen('home')} onHome={()=>setScreen('home')}
       meta={<Text style={styles.progressText}>{index+1}/{questions.length}</Text>}
       actionLabel={!checked?(mode==='test'?'Ghi nhận câu trả lời':'Kiểm tra đáp án'):(index+1===questions.length?'Xem kết quả →':'Câu tiếp theo →')}
       actionDisabled={!checked&&!normalize(input)} onAction={checked?nextQuestion:checkAnswer}>
-      <View style={styles.rowBetween}><Text style={styles.muted}>{mode==='test'&&examKind!=='topic'?'Đề tổng hợp':currentTopic.title} · {level}</Text><Text style={styles.progressText}>Câu {index+1}/{questions.length}</Text></View>
+      <View style={styles.rowBetween}><Text style={styles.muted}>{mode==='test'&&examKind!=='topic'?'Đề tổng hợp':mode==='bank'?(BANK_GROUPS.find(g=>g.id===q.groupId)?.title||currentTopic.title):currentTopic.title} · {mode==='bank'?q.level:level}</Text><Text style={styles.progressText}>Câu {index+1}/{questions.length}</Text></View>
       <View style={[styles.progressTrack,{marginVertical:0}]}><View style={[styles.progressFill,{width:`${(index+1)/questions.length*100}%`}]} /></View>
       <View style={[compactStyles.compactCard,q.visual&&{flexGrow:1,justifyContent:'space-around'}]}><Text style={compactStyles.smallLabel}>TÍNH VÀ ĐIỀN ĐÁP ÁN</Text><Text style={compactStyles.qText}>{q.question}</Text>
         <MathIllustration question={q} height={illustrationHeight}/>
@@ -908,6 +920,7 @@ export default function App() {
       <Text style={styles.brand}>🌟 MathKid 4 · {APP_VERSION}</Text><Text style={styles.muted}>Mỗi ngày một chút – Giỏi Toán từng bước</Text>
       <View style={styles.hero}><Text style={styles.heroTitle}>{getReward(progress.equippedReward)?.icon||'🌟'} Chào nhà toán học nhí! 👋</Text><Text style={styles.heroText}>Sẵn sàng chinh phục thử thách hôm nay?</Text><Text style={styles.heroStars}>⭐ {availableStars(progress)} sao để đổi quà · 🏅 {progress.stars} sao đã kiếm · ✅ {totalAnswered} câu</Text></View>
       <View style={styles.grid}>
+        <Tile icon="📚" title="Kho 1.000 bài tập" subtitle="9 nhóm · có lời giải từng câu" color="#e0f2ff" onPress={()=>setScreen('bank')} />
         <Tile icon="🎁" title="Cửa hàng ngôi sao" subtitle={availableStars(progress)+' sao · Đổi bạn đồng hành'} color="#fff0c7" onPress={()=>{setShopMessage('');setScreen('shop');}} />
         <Tile icon="📚" title="Học bài" subtitle="Kiến thức và ví dụ" color="#e6f4ea" onPress={() => setScreen('topics')} />
         <Tile icon="🧠" title="Ôn tập cá nhân hóa" subtitle="Sửa lỗi sai và xem tiến bộ" color="#f0eafd" onPress={() => setScreen("reviewPlan")} />
@@ -928,6 +941,30 @@ export default function App() {
       <Text style={styles.footnote}>Bài học, trò chơi và kết quả được xử lý trên thiết bị. APK cần được đóng gói và thử nghiệm offline; Expo Snack cần mạng để tải ban đầu.</Text>
     </>}
 
+    {screen === 'bank' && <>{header('Kho 1.000 bài tập')}
+      <Text style={styles.section}>9 nhóm kiến thức · 1.000 bài có lời giải</Text>
+      <Text style={styles.muted}>Bài sinh sẵn từ các mẫu theo kỹ năng, chưa phải 1.000 bài độc lập đã thẩm định theo SGK. Những câu chưa làm đúng được ưu tiên.</Text>
+      <View style={styles.card}><Text style={styles.rowTitle}>Đã làm đúng {groupStats(progress.history).reduce((n,g)=>n+g.done,0)}/{EXERCISE_BANK.length} bài khác nhau</Text>
+        <View style={styles.progressTrack}><View style={[styles.progressFill,{width:(groupStats(progress.history).reduce((n,g)=>n+g.done,0)/EXERCISE_BANK.length*100)+'%'}]}/></View>
+        <Text style={styles.muted}>Mỗi lượt 10 hoặc 20 câu. Có thể nhận tối đa 3 ⭐.</Text>
+      </View>
+      <Text style={styles.section}>Chọn nhóm</Text>
+      <Pressable style={[styles.choice,bankGroup==='all'&&styles.choiceActive]} onPress={()=>setBankGroup('all')}>
+        <Text style={styles.choiceText}>🌈 Tất cả · {EXERCISE_BANK.length} bài</Text><Text>{bankGroup==='all'?'✅':'○'}</Text>
+      </Pressable>
+      {groupStats(progress.history).map(g=><Pressable key={g.id} style={[styles.choice,bankGroup===g.id&&styles.choiceActive]} onPress={()=>setBankGroup(g.id)}>
+        <Text style={styles.choiceText}>{g.icon} {g.title} · {g.done}/{g.count}</Text><Text>{bankGroup===g.id?'✅':'○'}</Text>
+      </Pressable>)}
+      <Text style={styles.section}>Độ khó</Text>
+      <View style={styles.levelRow}>{['Tất cả','Cơ bản','Khá','Nâng cao'].map(l=><Pressable key={l} style={[styles.levelButton,bankLevel===l&&styles.levelActive]} onPress={()=>setBankLevel(l)}>
+        <Text style={[styles.levelText,bankLevel===l&&{color:'#fff'}]}>{l}</Text>
+      </Pressable>)}</View>
+      <Text style={styles.section}>Số câu mỗi lượt</Text>
+      <View style={styles.levelRow}>{[10,20].map(n=><Pressable key={n} style={[styles.levelButton,bankCount===n&&styles.levelActive]} onPress={()=>setBankCount(n)}>
+        <Text style={[styles.levelText,bankCount===n&&{color:'#fff'}]}>{n} câu</Text>
+      </Pressable>)}</View>
+      <Button onPress={beginBank}>Bắt đầu luyện kho bài tập →</Button>
+    </>}
     {screen === 'shop' && <>{header('Cửa hàng ngôi sao')}
       <View style={[styles.hero,{backgroundColor:'#fff1cc'}]}>
         <Text style={styles.heroTitle}>🎁 Đổi sao lấy quà</Text>
@@ -1052,9 +1089,9 @@ export default function App() {
 
     {['choose', 'gameChoose', 'testChoose'].includes(screen) && <>{header(screen === 'choose' ? 'Luyện tập' : screen === 'gameChoose' ? 'Chơi Toán' : 'Kiểm tra')}<Text style={styles.section}>1. Chọn chủ đề</Text>{TOPICS.map(t => <Pressable key={t.id} onPress={() => setTopic(t.id)} style={[styles.choice, topic === t.id && styles.choiceActive]}><Text style={styles.choiceText}>{t.icon}  {t.title}</Text><Text>{topic === t.id ? '✅' : '○'}</Text></Pressable>)}<Text style={styles.section}>2. Chọn độ khó</Text><View style={styles.levelRow}>{['Cơ bản', 'Khá', 'Nâng cao'].map(l => <Pressable key={l} onPress={() => setLevel(l)} style={[styles.levelButton, level === l && styles.levelActive]}><Text style={[styles.levelText, level === l && { color: '#fff' }]}>{l}</Text></Pressable>)}</View>{screen === 'testChoose' && <><Text style={styles.section}>3. Dạng đề</Text><View style={styles.levelRow}>{[{id:'topic',label:'Chủ đề'},{id:'mid',label:'Giữa kỳ'},{id:'final',label:'Cuối kỳ'},{id:'advanced',label:'Nâng cao'}].map(e=><Pressable key={e.id} onPress={()=>setExamKind(e.id)} style={[styles.levelButton,examKind===e.id&&styles.levelActive]}><Text style={[styles.levelText,examKind===e.id&&{color:'#fff'}]}>{e.label}</Text></Pressable>)}</View><Text style={styles.section}>4. Số câu hỏi</Text><View style={styles.levelRow}>{[10,20].map(n=><Pressable key={n} onPress={()=>setTestSize(n)} style={[styles.levelButton,testSize===n && styles.levelActive]}><Text style={[styles.levelText,testSize===n && {color:'#fff'}]}>{n} câu</Text></Pressable>)}</View><Text style={styles.muted}>Đề tự sinh theo nhóm chủ đề, không phải ma trận hoặc đề chính thức của bộ sách. Chế độ kiểm tra chỉ hiện lời giải sau khi nộp bài.</Text></>}<Text style={styles.footnote}>{screen === 'gameChoose' ? '5 câu / lượt. Nhận 0–3 sao tùy kết quả.' : '10 câu / lượt. Có giải thích sau mỗi câu.'}</Text><Button onPress={() => begin(screen === 'gameChoose' ? 'game' : screen === 'testChoose' ? 'test' : 'practice')}>Bắt đầu →</Button></>}
 
-    {screen === 'quiz' && q && <>{header(mode === 'game' ? '🎮 Vượt ải' : mode === 'test' ? '🏆 Kiểm tra' : '✏️ Luyện tập', 'home')}<View style={styles.rowBetween}><Text style={styles.muted}>{mode==='test'&&examKind!=='topic'?'Đề tổng hợp':currentTopic.title} · {level}</Text><Text style={styles.progressText}>Câu {index + 1}/{questions.length}</Text></View><View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${(index + 1) / questions.length * 100}%` }]} /></View><View style={styles.questionCard}><Text style={styles.questionLabel}>TÍNH VÀ ĐIỀN ĐÁP ÁN</Text><Text style={styles.question}>{q.question}</Text><MathIllustration question={q} height={illustrationHeight}/><TextInput style={[styles.answerInput, checked && { borderColor: isCorrect ? GREEN : '#d14b4b' }]} placeholder="Nhập đáp án" placeholderTextColor="#91a09a" keyboardType="number-pad" value={input} onChangeText={setInput} editable={!checked} returnKeyType="done" onSubmitEditing={checkAnswer} accessibilityLabel="Đáp án của con" /><Text style={styles.muted}>Có thể nhập số có hoặc không có dấu cách.</Text></View>{checked && mode !== 'test' && <View style={[styles.feedback, { backgroundColor: isCorrect ? '#e6f4ea' : '#fff0ed' }]}><Text style={styles.feedbackTitle}>{isCorrect ? '🎉 Chính xác! Giỏi lắm!' : `💡 Đáp án đúng: ${formatNum(q.answer)}`}</Text><Text style={styles.paragraph}>{q.explanation}</Text></View>}{!checked && mode !== 'test' && <View style={styles.card}><Button secondary small onPress={() => setHintLevel(v => Math.min(3, v + 1))}>💡 Gợi ý {hintLevel}/3</Button>{hintLevel > 0 && <Text style={styles.paragraph}>{hintLevel === 1 ? 'Đọc kỹ đề bài: con cần tìm giá trị nào? Hãy nhớ quy tắc đã học trong chủ đề này.' : hintLevel === 2 ? 'Hãy viết phép tính ra giấy và kiểm tra từng bước trước khi điền đáp án.' : q.explanation}</Text>}</View>}{!checked ? <Button disabled={!normalize(input)} onPress={checkAnswer}>{mode === 'test' ? 'Ghi nhận câu trả lời' : 'Kiểm tra đáp án'}</Button> : <Button onPress={nextQuestion}>{index + 1 === questions.length ? 'Xem kết quả →' : 'Câu tiếp theo →'}</Button>}<Text style={styles.footnote}>Nếu con làm sai, hãy đọc lời giải trước khi tiếp tục.</Text></>}
+    {screen === 'quiz' && q && <>{header(mode === 'game' ? '🎮 Vượt ải' : mode === 'test' ? '🏆 Kiểm tra' : '✏️ Luyện tập', 'home')}<View style={styles.rowBetween}><Text style={styles.muted}>{mode==='test'&&examKind!=='topic'?'Đề tổng hợp':mode==='bank'?(BANK_GROUPS.find(g=>g.id===q.groupId)?.title||currentTopic.title):currentTopic.title} · {mode==='bank'?q.level:level}</Text><Text style={styles.progressText}>Câu {index + 1}/{questions.length}</Text></View><View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${(index + 1) / questions.length * 100}%` }]} /></View><View style={styles.questionCard}><Text style={styles.questionLabel}>TÍNH VÀ ĐIỀN ĐÁP ÁN</Text><Text style={styles.question}>{q.question}</Text><MathIllustration question={q} height={illustrationHeight}/><TextInput style={[styles.answerInput, checked && { borderColor: isCorrect ? GREEN : '#d14b4b' }]} placeholder="Nhập đáp án" placeholderTextColor="#91a09a" keyboardType="number-pad" value={input} onChangeText={setInput} editable={!checked} returnKeyType="done" onSubmitEditing={checkAnswer} accessibilityLabel="Đáp án của con" /><Text style={styles.muted}>Có thể nhập số có hoặc không có dấu cách.</Text></View>{checked && mode !== 'test' && <View style={[styles.feedback, { backgroundColor: isCorrect ? '#e6f4ea' : '#fff0ed' }]}><Text style={styles.feedbackTitle}>{isCorrect ? '🎉 Chính xác! Giỏi lắm!' : `💡 Đáp án đúng: ${formatNum(q.answer)}`}</Text><Text style={styles.paragraph}>{q.explanation}</Text></View>}{!checked && mode !== 'test' && <View style={styles.card}><Button secondary small onPress={() => setHintLevel(v => Math.min(3, v + 1))}>💡 Gợi ý {hintLevel}/3</Button>{hintLevel > 0 && <Text style={styles.paragraph}>{hintLevel === 1 ? 'Đọc kỹ đề bài: con cần tìm giá trị nào? Hãy nhớ quy tắc đã học trong chủ đề này.' : hintLevel === 2 ? 'Hãy viết phép tính ra giấy và kiểm tra từng bước trước khi điền đáp án.' : q.explanation}</Text>}</View>}{!checked ? <Button disabled={!normalize(input)} onPress={checkAnswer}>{mode === 'test' ? 'Ghi nhận câu trả lời' : 'Kiểm tra đáp án'}</Button> : <Button onPress={nextQuestion}>{index + 1 === questions.length ? 'Xem kết quả →' : 'Câu tiếp theo →'}</Button>}<Text style={styles.footnote}>Nếu con làm sai, hãy đọc lời giải trước khi tiếp tục.</Text></>}
 
-    {screen === 'result' && sessionDone && <>{header('Kết quả')}<Button secondary onPress={()=>setScreen('shop')}>🎁 Dùng sao đổi bạn đồng hành →</Button><View style={styles.resultCard}><Text style={styles.resultEmoji}>{sessionDone.correct / sessionDone.total >= .8 ? '🏆' : '🌈'}</Text><Text style={styles.section}>Con đã hoàn thành!</Text><Text style={styles.bigScore}>{sessionDone.score.toFixed(1).replace('.', ',')}/10</Text><Text style={styles.paragraph}>{sessionDone.correct}/{sessionDone.total} câu đúng</Text>{(mode === 'game'||mode==='mini'||mode==='shark'||mode==='drag') && <Text style={styles.heroStars}>+ {sessionDone.stars} ⭐</Text>}</View>{sessionDone.answers.filter(a => mode === 'test' || !a.correct).length > 0 && <><Text style={styles.section}>{mode === 'test' ? 'Đáp án và lời giải' : 'Câu cần ôn lại'}</Text>{sessionDone.answers.filter(a => mode === 'test' || !a.correct).map((a, i) => <View key={i} style={styles.card}><Text style={styles.rowTitle}>{a.question}</Text><Text style={styles.muted}>Con trả lời: {a.userAnswer} · Đúng: {formatNum(a.answer)} {a.correct ? '✅' : '❌'}</Text><Text style={styles.paragraph}>{a.explanation}</Text></View>)}</>}<Button onPress={() => mode==='mini'?beginMini():mode==='shark'?startShark():mode==='drag'?startMatch():mode==='review'?beginReview():begin(mode,topic,level)}>Làm lượt mới</Button><Button secondary onPress={() => setScreen('home')}>Về trang chủ</Button></>}
+    {screen === 'result' && sessionDone && <>{header('Kết quả')}<Button secondary onPress={()=>setScreen('shop')}>🎁 Dùng sao đổi bạn đồng hành →</Button><View style={styles.resultCard}><Text style={styles.resultEmoji}>{sessionDone.correct / sessionDone.total >= .8 ? '🏆' : '🌈'}</Text><Text style={styles.section}>Con đã hoàn thành!</Text><Text style={styles.bigScore}>{sessionDone.score.toFixed(1).replace('.', ',')}/10</Text><Text style={styles.paragraph}>{sessionDone.correct}/{sessionDone.total} câu đúng</Text>{(mode === 'game'||mode==='bank'||mode==='mini'||mode==='shark'||mode==='drag') && <Text style={styles.heroStars}>+ {sessionDone.stars} ⭐</Text>}</View>{sessionDone.answers.filter(a => mode === 'test' || !a.correct).length > 0 && <><Text style={styles.section}>{mode === 'test' ? 'Đáp án và lời giải' : 'Câu cần ôn lại'}</Text>{sessionDone.answers.filter(a => mode === 'test' || !a.correct).map((a, i) => <View key={i} style={styles.card}><Text style={styles.rowTitle}>{a.question}</Text><Text style={styles.muted}>Con trả lời: {a.userAnswer} · Đúng: {formatNum(a.answer)} {a.correct ? '✅' : '❌'}</Text><Text style={styles.paragraph}>{a.explanation}</Text></View>)}</>}<Button onPress={() => mode==='mini'?beginMini():mode==='shark'?startShark():mode==='drag'?startMatch():mode==='review'?beginReview():mode==='bank'?beginBank():begin(mode,topic,level)}>Làm lượt mới</Button><Button secondary onPress={() => setScreen('home')}>Về trang chủ</Button></>}
 
     {screen === 'history' && <>{header('Thành tích')}<View style={styles.stats}><View><Text style={styles.statNumber}>{progress.history.length}</Text><Text style={styles.muted}>Lượt học</Text></View><View><Text style={styles.statNumber}>{average}%</Text><Text style={styles.muted}>Tỷ lệ đúng</Text></View><View><Text style={styles.statNumber}>{progress.stars}</Text><Text style={styles.muted}>Ngôi sao</Text></View></View><Text style={styles.section}>Huy hiệu đã nhận</Text><Text style={styles.paragraph}>{(progress.badges||[]).length?(progress.badges||[]).map(b=>'🏅 '+b).join(' · '):'Hoàn thành các thử thách để nhận huy hiệu.'}</Text><Text style={styles.section}>Lịch sử gần đây</Text>{progress.history.length === 0 ? <Text style={styles.muted}>Chưa có kết quả. Hãy làm một lượt bài tập nhé!</Text> : progress.history.slice(0, 30).map(h => <Pressable key={h.id} style={styles.card} onPress={() => { setSessionDone(h); setScreen('pastResult'); }}><Text style={styles.rowTitle}>{TOPICS.find(t => t.id === h.topic)?.title || h.topic} · {h.level}</Text><Text style={styles.muted}>{new Date(h.date).toLocaleString('vi-VN')} · {(h.mode === 'game'||h.mode==='mini') ? 'Trò chơi' : h.mode === 'test' ? 'Kiểm tra' : h.mode==='shark'?'Vượt biển':h.mode==='drag'?'Kéo thả':h.mode==='steps'?'Toán nhiều bước':h.mode==='review'?'Ôn lỗi sai':'Luyện tập'}</Text><Text style={styles.progressText}>{h.correct}/{h.total} đúng · {h.score.toFixed(1).replace('.', ',')}/10</Text></Pressable>)}</>}
 
