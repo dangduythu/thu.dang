@@ -8,7 +8,7 @@
     "android": "expo start --android",
     "web": "expo start --web",
     "check": "expo install --check",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test"
   },
   "dependencies": {
     "expo": "~54.0.0",
