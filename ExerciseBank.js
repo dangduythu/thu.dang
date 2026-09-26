@@ -137,5 +137,16 @@ export function chooseExercises(groupId,level='Tất cả',count=10,history=[]){
   const pending=matching.filter(q=>!seen.has(q.id));
   // Repeat completed questions only when the chosen pool has been fully mastered.
   const pool=pending.length?pending:matching;
-  return pool.slice(0,Math.max(1,Math.min(20,Math.floor(count)||10)));
+  const target=Math.max(1,Math.min(20,Math.floor(count)||10));
+  if(groupId!=='all')return pool.slice(0,target);
+  const sections=BANK_GROUPS.map(g=>pool.filter(q=>q.groupId===g.id));
+  const selected=[];
+  for(let i=0;selected.length<target;i++){
+    let found=false;
+    for(const section of sections){
+      if(section[i]){selected.push(section[i]);found=true;if(selected.length>=target)break;}
+    }
+    if(!found)break;
+  }
+  return selected;
 }
