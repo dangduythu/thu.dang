@@ -1,4 +1,5 @@
 name: Build MathKid V8.3 Android APK (internal test)
+run-name: 'MathKid V8.3 APK · 1000 bài tập · ${{ github.sha }}'
 on:
   push:
     branches:
