@@ -69,6 +69,7 @@ export function applyMentalStars(progress,delta){
   const earned=Math.max(0,Math.floor(Number(progress?.stars)||0));
   const spent=Math.max(0,Math.floor(Number(progress?.starSpent)||0));
   // A penalty never creates negative spendable stars or invalidates past redemptions.
-  const actual=delta<0?-Math.min(-delta,Math.max(0,earned-spent)):delta;
+  const penalty=delta<0?Math.min(-delta,Math.max(0,earned-spent)):0;
+  const actual=delta<0?(penalty===0?0:-penalty):delta;
   return {delta:actual,progress:{...progress,stars:earned+actual}};
 }
