@@ -37,6 +37,7 @@ for(const [correct,total,expected] of [
 ])assert.equal(mentalStarDelta(correct,total),expected);
 assert.deepEqual(applyMentalStars({stars:9,starSpent:8},-3),{delta:-1,progress:{stars:8,starSpent:8}});
 assert.deepEqual(applyMentalStars({stars:0,starSpent:0},-3),{delta:0,progress:{stars:0,starSpent:0}});
+assert.equal(Object.is(applyMentalStars({stars:0,starSpent:0},-3).delta,-0),false);
 assert.equal(applyMentalStars({stars:10,starSpent:2},10).progress.stars,20);
 assert.equal(backDestination('mental'),'home');
 assert.equal(backDestination('quiz','mental'),'mental');
