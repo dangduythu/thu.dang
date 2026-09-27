@@ -1,24 +1,43 @@
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 const imp=async name=>import('data:text/javascript;base64,'+Buffer.from(readFileSync(new URL('../'+name,import.meta.url),'utf8')).toString('base64'));
-const {generateMentalSet}=await imp('MentalMath.js');
+const {generateMentalSet,mentalStarDelta,applyMentalStars,SECONDS_PER_QUESTION}=await imp('MentalMath.js');
 const {REAL_REWARDS,remainingStars,redeemRealReward,markRewardDelivered}=await imp('RealRewards.js');
 const {normalizeProgress,makeBackup,parseBackup,PROGRESS_KEY}=await imp('ProgressStorage.js');
 const {backDestination}=await imp('Navigation.js');
-for(const digits of [1,2,3])for(const operation of ['multiply','divide','mixed'])for(let seed=1;seed<=40;seed++){
-  const rows=generateMentalSet({digits,operation,count:20,seed});
-  assert.equal(rows.length,20);
-  assert.equal(new Set(rows.map(x=>x.id)).size,20);
-  for(const q of rows){
-    assert.equal(String(q.factor).length,digits);
-    assert.equal(q.dividend,q.factor*q.other);
-    assert.equal(q.answer,q.operation==='divide'?q.other:q.dividend);
-    assert.ok(Number.isInteger(q.answer)&&q.answer>0&&q.question&&q.explanation);
-    if(operation!=='mixed')assert.equal(q.operation,operation);
-  }
-}
-assert.throws(()=>generateMentalSet({digits:4}));
+for(const dividendDigits of [2,3])for(const multiplierDigits of [1,2,3])
+  for(const operation of ['multiply','divide','mixed'])for(let seed=1;seed<=10;seed++)
+    for(const count of [50,100]){
+      const rows=generateMentalSet({dividendDigits,multiplierDigits,operation,count,seed});
+      assert.equal(rows.length,count);
+      assert.equal(new Set(rows.map(q=>q.id)).size,count);
+      assert.equal(new Set(rows.map(q=>q.question)).size,count);
+      for(const q of rows){
+        assert.equal(q.dividend,q.factor*q.other);
+        assert.equal(q.answer,q.operation==='divide'?q.other:q.dividend);
+        assert.ok(Number.isInteger(q.answer)&&q.answer>0&&q.question&&q.explanation);
+        if(q.operation==='multiply'){
+          assert.equal(String(q.factor).length,multiplierDigits);
+          assert.equal(String(q.other).length,dividendDigits);
+        }else{
+          assert.equal(String(q.dividend).length,dividendDigits);
+          assert.ok(q.divisor>=2&&q.divisor<=9&&q.dividend%q.divisor===0);
+        }
+        if(operation!=='mixed')assert.equal(q.operation,operation);
+      }
+    }
+assert.equal(SECONDS_PER_QUESTION,5);
+assert.throws(()=>generateMentalSet({multiplierDigits:4}));
+assert.throws(()=>generateMentalSet({dividendDigits:1}));
+assert.throws(()=>generateMentalSet({count:20}));
 assert.throws(()=>generateMentalSet({operation:'subtract'}));
+for(const [correct,total,expected] of [
+  [0,50,-3],[24,50,-3],[25,50,1],[40,50,1],[41,50,3],[49,50,3],[50,50,10],
+  [49,100,-3],[50,100,1],[80,100,1],[81,100,3],[99,100,3],[100,100,10]
+])assert.equal(mentalStarDelta(correct,total),expected);
+assert.deepEqual(applyMentalStars({stars:9,starSpent:8},-3),{delta:-1,progress:{stars:8,starSpent:8}});
+assert.deepEqual(applyMentalStars({stars:0,starSpent:0},-3),{delta:0,progress:{stars:0,starSpent:0}});
+assert.equal(applyMentalStars({stars:10,starSpent:2},10).progress.stars,20);
 assert.equal(backDestination('mental'),'home');
 assert.equal(backDestination('quiz','mental'),'mental');
 assert.deepEqual(REAL_REWARDS.map(x=>x.price),[30,200]);
@@ -50,4 +69,4 @@ assert.equal(restored.redemptions.find(x=>x.id==='reward-unique-0001').status,'d
 assert.equal(restored.starSpent,260);
 assert.equal(restored.stars,260);
 assert.equal(restored.ownedRewards[0],'explorer');
-console.log('PASS: 7200 mental questions, exact arithmetic, repeatable vouchers, legacy data and JSON backup');
+console.log('PASS: 9000 mental questions, timed sprint thresholds, repeatable vouchers, legacy data and JSON backup');
