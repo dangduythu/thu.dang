@@ -804,20 +804,18 @@ export default function App() {
     }catch(e){Alert.alert('Chưa lưu được phần thưởng','Vui lòng thử lại; sao và vật phẩm chưa bị thay đổi.');}
     finally{shopSaving.current=false;}
   }
-  async function buyReward(id){
-    if(shopSaving.current)return;
-    const outcome=purchaseReward(progress,id);
-    if(!outcome.ok){
-      setShopMessage(outcome.reason==='insufficient'?'Con chưa đủ sao. Hãy hoàn thành thêm thử thách!':outcome.reason==='owned'?'Con đã sở hữu phần thưởng này.':'Không tìm thấy phần thưởng.');
-      return;
-    }
-    await persistShop(outcome.progress,'Đã đổi '+outcome.reward.title+'! Con có thể dùng ngay trên trang chủ.');
+  async function confirmRealReward(){
+    if(!rewardToConfirm||shopSaving.current)return;
+    const requestId='reward-'+Date.now()+'-'+Math.random().toString(36).slice(2,10);
+    const outcome=redeemRealReward(progress,rewardToConfirm,requestId);
+    if(!outcome.ok){setShopMessage('Không đủ sao hoặc chưa thể tạo phiếu.');setRewardToConfirm(null);return;}
+    await persistShop(outcome.progress,'Đã tạo phiếu '+outcome.record.title+'. Hãy nhờ bố mẹ xem và thực hiện phần thưởng.');
+    setRewardToConfirm(null);
   }
-  async function wearReward(id){
+  async function deliverRealReward(id){
     if(shopSaving.current)return;
-    const outcome=equipReward(progress,id);
-    if(!outcome.ok)return;
-    await persistShop(outcome.progress,'Đã chọn '+getReward(id).title+' làm người bạn đồng hành!');
+    const outcome=markRewardDelivered(progress,id);
+    if(outcome.ok)await persistShop(outcome.progress,'Đã ghi nhận bố mẹ hoàn thành phiếu thưởng.');
   }
   function generateBackup(){
     const payload=makeBackup(progress,book);
@@ -989,25 +987,33 @@ export default function App() {
       </Pressable>)}</View>
       <Button onPress={beginBank}>Bắt đầu luyện kho bài tập →</Button>
     </>}
-    {screen === 'shop' && <>{header('Cửa hàng ngôi sao')}
+    {screen === 'shop' && <>{header('Đổi sao lấy quà')}
       <View style={[styles.hero,{backgroundColor:'#fff1cc'}]}>
-        <Text style={styles.heroTitle}>🎁 Đổi sao lấy quà</Text>
-        <Text style={styles.paragraph}>⭐ {availableStars(progress)} sao có thể dùng · 🏅 {progress.stars} sao đã kiếm</Text>
-        <Text style={styles.muted}>Phần thưởng ảo trong ứng dụng, không tốn tiền thật và không có phần thưởng ngẫu nhiên.</Text>
+        <Text style={styles.heroTitle}>🍦🎈 Phần thưởng của con</Text>
+        <Text style={styles.paragraph}>⭐ {remainingStars(progress)} sao còn dùng · 🏅 {progress.stars} sao đã kiếm</Text>
+        <Text style={styles.muted}>Sao dùng để tạo phiếu đề nghị bố mẹ thưởng. Ứng dụng không tự mua kem hay thanh toán vé nhà bóng.</Text>
       </View>
-      {shopMessage?<View style={[styles.card,{backgroundColor:'#e4f8e9'}]}><Text style={styles.rowTitle}>{shopMessage}</Text></View>:null}
-      <Text style={styles.section}>Bộ sưu tập của con</Text>
-      {STAR_REWARDS.map(reward=>{const owned=(progress.ownedRewards||[]).includes(reward.id);
-        const equipped=progress.equippedReward===reward.id;
-        return <View key={reward.id} style={[styles.card,{backgroundColor:equipped?'#fff2cd':'#fff'}]}>
-          <View style={styles.rowBetween}><Text style={styles.rowTitle}>{reward.icon} {reward.title}</Text><Text style={styles.progressText}>{equipped?'Đang dùng':owned?'Đã có':reward.price+' ⭐'}</Text></View>
-          <Text style={styles.paragraph}>{reward.description}</Text>
-          <Button disabled={equipped||(!owned&&availableStars(progress)<reward.price)}
-            secondary={owned} onPress={()=>owned?wearReward(reward.id):buyReward(reward.id)}>
-            {equipped?'✓ Đang đồng hành':owned?'Chọn làm bạn đồng hành':availableStars(progress)<reward.price?'Cần thêm '+(reward.price-availableStars(progress))+' sao':'Đổi '+reward.price+' sao'}
-          </Button>
-        </View>;})}
-      <Text style={styles.footnote}>Đổi quà không làm mất huy hiệu, kỷ lục ải hoặc tổng sao đã kiếm. Quà đã mở khóa được lưu trong bản sao lưu JSON V8.</Text>
+      {shopMessage?<View style={styles.card}><Text style={styles.paragraph}>{shopMessage}</Text></View>:null}
+      {REAL_REWARDS.map(item=><View key={item.id} style={styles.card}>
+        <Text style={styles.rowTitle}>{item.icon} {item.title} · {item.price} ⭐</Text>
+        <Text style={styles.paragraph}>{item.description}</Text>
+        <Text style={styles.muted}>Có thể đổi nhiều lần khi đủ sao; mỗi lượt tạo một phiếu riêng.</Text>
+        <Button disabled={remainingStars(progress)<item.price} onPress={()=>setRewardToConfirm(item.id)}>
+          {remainingStars(progress)<item.price?'Cần thêm '+(item.price-remainingStars(progress))+' sao':'Đổi '+item.price+' sao →'}
+        </Button>
+      </View>)}
+      {rewardToConfirm&&<View style={[styles.card,{backgroundColor:'#fff1cc'}]}>
+        <Text style={styles.rowTitle}>Xác nhận đổi {REAL_REWARDS.find(x=>x.id===rewardToConfirm)?.title}</Text>
+        <Text style={styles.paragraph}>Con sẽ dùng {REAL_REWARDS.find(x=>x.id===rewardToConfirm)?.price} sao để tạo một phiếu thưởng. Hãy hỏi ý kiến bố mẹ trước khi xác nhận.</Text>
+        <Button onPress={confirmRealReward}>Xác nhận tạo phiếu →</Button>
+        <Button secondary onPress={()=>setRewardToConfirm(null)}>Hủy</Button>
+      </View>}
+      <Text style={styles.section}>Phiếu thưởng của con</Text>
+      {(progress.redemptions||[]).length===0?<Text style={styles.muted}>Chưa có phiếu đổi quà.</Text>:(progress.redemptions||[]).map(r=><View key={r.id} style={styles.card}>
+        <Text style={styles.rowTitle}>{r.rewardId==='icecream'?'🍦':'🎈'} {r.title} · {r.price} ⭐</Text>
+        <Text style={styles.muted}>{new Date(r.requestedAt).toLocaleString('vi-VN')} · {r.status==='delivered'?'✅ Bố mẹ đã xác nhận':'⏳ Chờ bố mẹ thực hiện'}</Text>
+      </View>)}
+      <Text style={styles.footnote}>Số sao đã tiêu và phiếu thưởng được giữ trong bản sao lưu JSON. Quà ảo V8.1 đã nhận trước đây vẫn nằm trong dữ liệu cũ.</Text>
       <Button secondary onPress={()=>setScreen('home')}>Về Menu →</Button>
     </>}
     {screen === 'book' && <>{header('Chọn bộ sách')}<Text style={styles.section}>Con đang sử dụng bộ sách nào?</Text>{BOOKS.map(b=><Pressable key={b.id} onPress={()=>{setBook(b.id);save({...progress,book:b.id});}} style={[styles.choice,book===b.id&&styles.choiceActive]}><Text style={styles.choiceText}>{b.name}</Text><Text>{book===b.id?'✅':'○'}</Text></Pressable>)}<Text style={styles.footnote}>Bộ sách là thiết lập hồ sơ. Thứ tự và ma trận đề chính thức của từng sách chưa được đối chiếu; học theo lộ trình chung 120 thẻ.</Text><Button onPress={()=>setScreen('home')}>Xong</Button></>}
@@ -1143,7 +1149,7 @@ export default function App() {
       <Button secondary onPress={loadPreRestore}>Nạp bản dự phòng trước lần khôi phục gần nhất</Button>
       <Text style={styles.footnote}>Dữ liệu trên Windows, Android và Expo Snack được lưu riêng. Muốn chuyển máy, hãy xuất JSON ở máy cũ và nhập vào máy mới. Luôn lưu bản JSON bên ngoài ứng dụng trước khi gỡ hoặc cài lại.</Text>
     </>}
-    {screen === 'parent' && <>{header('Góc bố mẹ')}<Text style={styles.muted}>Sao tích lũy: {progress.stars} · Đã dùng: {progress.starSpent||0} · Còn lại: {availableStars(progress)} · Quà mở khóa: {(progress.ownedRewards||[]).length}</Text><Text style={styles.section}>Báo cáo học tập</Text><View style={styles.stats}><View><Text style={styles.statNumber}>{totalAnswered}</Text><Text style={styles.muted}>Câu đã làm</Text></View><View><Text style={styles.statNumber}>{average}%</Text><Text style={styles.muted}>Tỷ lệ đúng</Text></View><View><Text style={styles.statNumber}>{progress.history.length}</Text><Text style={styles.muted}>Lượt học</Text></View></View><Text style={styles.section}>Độ khó gợi ý cho buổi tiếp theo</Text>{TOPICS.map(t=><Text key={t.id} style={styles.muted}>{t.icon} {t.title}: {recommendedLevel(progress.history,t.id)} ({topicStats(progress.history,t.id).total} câu đã ghi nhận)</Text>)}<Text style={styles.section}>Kết quả theo chủ đề</Text>{TOPICS.map(t => { const st=topicStats(progress.history,t.id); const total=st.total; const correct=st.correct; const pct = total ? Math.round(correct / total * 100) : 0; return <View key={t.id} style={styles.card}><View style={styles.rowBetween}><Text style={styles.rowTitle}>{t.icon} {t.title}</Text><Text style={styles.progressText}>{total ? pct + '%' : 'Chưa học'}</Text></View><View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${pct}%` }]} /></View><Text style={styles.muted}>{correct}/{total} câu đúng</Text></View>; })}<Text style={styles.footnote}>Bản Pro thử nghiệm: báo cáo trên cùng điện thoại; chưa có mã PIN phụ huynh; có thể xuất/nhập bản sao lưu JSON thủ công ở cuối màn này.</Text><Button secondary onPress={() => setScreen('reviewPlan')}>Ôn tập cá nhân hóa và xu hướng</Button><Button secondary onPress={() => setScreen('coach')}>Xem gợi ý gia sư offline</Button><Button secondary onPress={() => setScreen('history')}>Xem lịch sử chi tiết</Button><Button secondary onPress={generateBackup}>Sao lưu / khôi phục dữ liệu</Button></>}
+    {screen === 'parent' && <>{header('Góc bố mẹ')}<Text style={styles.muted}>Sao tích lũy: {progress.stars} · Đã dùng: {progress.starSpent||0} · Còn lại: {remainingStars(progress)} · Phiếu thưởng: {(progress.redemptions||[]).length} · Quà ảo V8.1: {(progress.ownedRewards||[]).length}</Text><Text style={styles.section}>Phiếu quà cần bố mẹ xác nhận</Text>{(progress.redemptions||[]).filter(r=>r.status==='pending').length===0?<Text style={styles.muted}>Hiện không có phiếu chờ.</Text>:(progress.redemptions||[]).filter(r=>r.status==='pending').map(r=><View key={r.id} style={styles.card}><Text style={styles.rowTitle}>{r.title} · {r.price} sao</Text><Text style={styles.muted}>{new Date(r.requestedAt).toLocaleString('vi-VN')} · Chưa trao quà</Text><Button secondary onPress={()=>deliverRealReward(r.id)}>Bố mẹ xác nhận đã trao quà →</Button></View>)}<Text style={styles.section}>Báo cáo học tập</Text><View style={styles.stats}><View><Text style={styles.statNumber}>{totalAnswered}</Text><Text style={styles.muted}>Câu đã làm</Text></View><View><Text style={styles.statNumber}>{average}%</Text><Text style={styles.muted}>Tỷ lệ đúng</Text></View><View><Text style={styles.statNumber}>{progress.history.length}</Text><Text style={styles.muted}>Lượt học</Text></View></View><Text style={styles.section}>Độ khó gợi ý cho buổi tiếp theo</Text>{TOPICS.map(t=><Text key={t.id} style={styles.muted}>{t.icon} {t.title}: {recommendedLevel(progress.history,t.id)} ({topicStats(progress.history,t.id).total} câu đã ghi nhận)</Text>)}<Text style={styles.section}>Kết quả theo chủ đề</Text>{TOPICS.map(t => { const st=topicStats(progress.history,t.id); const total=st.total; const correct=st.correct; const pct = total ? Math.round(correct / total * 100) : 0; return <View key={t.id} style={styles.card}><View style={styles.rowBetween}><Text style={styles.rowTitle}>{t.icon} {t.title}</Text><Text style={styles.progressText}>{total ? pct + '%' : 'Chưa học'}</Text></View><View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${pct}%` }]} /></View><Text style={styles.muted}>{correct}/{total} câu đúng</Text></View>; })}<Text style={styles.footnote}>Bản Pro thử nghiệm: báo cáo trên cùng điện thoại; chưa có mã PIN phụ huynh; có thể xuất/nhập bản sao lưu JSON thủ công ở cuối màn này.</Text><Button secondary onPress={() => setScreen('reviewPlan')}>Ôn tập cá nhân hóa và xu hướng</Button><Button secondary onPress={() => setScreen('coach')}>Xem gợi ý gia sư offline</Button><Button secondary onPress={() => setScreen('history')}>Xem lịch sử chi tiết</Button><Button secondary onPress={generateBackup}>Sao lưu / khôi phục dữ liệu</Button></>}
   </ScrollView></SafeAreaView>;
 }
 
