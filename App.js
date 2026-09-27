@@ -13,7 +13,7 @@ import {PROGRESS_KEY, PRE_RESTORE_KEY, normalizeProgress, makeBackup, parseBacku
 import {backDestination} from './Navigation';
 import {STAR_REWARDS, availableStars, getReward, purchaseReward, equipReward} from './StarShop';
 import {EXERCISE_BANK, BANK_GROUPS, chooseExercises, groupStats} from './ExerciseBank';
-import {MENTAL_OPERATIONS, FACTOR_DIGITS, generateMentalSet} from './MentalMath';
+import {MENTAL_OPERATIONS, FACTOR_DIGITS, DIVIDEND_DIGITS, MENTAL_COUNTS, SECONDS_PER_QUESTION, generateMentalSet, mentalStarDelta, applyMentalStars} from './MentalMath';
 import {REAL_REWARDS, remainingStars, redeemRealReward, markRewardDelivered} from './RealRewards';
 
 const SAVE_KEY = PROGRESS_KEY; // Giữ chính xác khóa V5–V7.5 để đọc lịch sử cũ.
@@ -26,7 +26,7 @@ const BOOKS = [
 // Bản alpha: lựa chọn bộ sách là tùy chọn hồ sơ, CHƯA phải ma trận đề được duyệt theo SGK.
 
 const GREEN = '#168451';
-const APP_VERSION = 'V8.4 Preview · Tính nhẩm & Đổi sao';
+const APP_VERSION = 'V8.4.1 Preview · Thử thách 5 giây';
 const desktopBridge = () => Platform.OS==='web' && typeof window!=='undefined' ? window.mathkidDesktop : null;
 const TOPICS = [
   { id: 'numbers', title: 'Số tự nhiên', icon: '🔢', color: '#e6f4ea', description: 'Hàng, lớp, so sánh và làm tròn số', lessons: [
@@ -527,8 +527,13 @@ export default function App() {
   const [shopMessage,setShopMessage] = useState('');
   const [rewardToConfirm,setRewardToConfirm]=useState(null);
   const [mentalOperation,setMentalOperation]=useState('mixed');
-  const [mentalDigits,setMentalDigits]=useState(1);
-  const [mentalCount,setMentalCount]=useState(10);
+  const [mentalMultiplierDigits,setMentalMultiplierDigits]=useState(1);
+  const [mentalDividendDigits,setMentalDividendDigits]=useState(2);
+  const [mentalCount,setMentalCount]=useState(50);
+  const [mentalTime,setMentalTime]=useState(SECONDS_PER_QUESTION);
+  const mentalDeadline=useRef(0);
+  const mentalQuestionRef=useRef(-1);
+  const mentalResolving=useRef(false);
   const [bankGroup,setBankGroup] = useState('all');
   const [bankLevel,setBankLevel] = useState('Tất cả');
   const [bankCount,setBankCount] = useState(10);
@@ -593,6 +598,19 @@ export default function App() {
     return ()=>listener.remove();
   },[screen,mode]);
 
+  useEffect(()=>{
+    if(screen!=='quiz'||mode!=='mental'||checked)return undefined;
+    const active=index;
+    const tick=()=>{
+      if(mentalQuestionRef.current!==active||mentalResolving.current)return;
+      const remaining=Math.max(0,Math.ceil((mentalDeadline.current-Date.now())/1000));
+      setMentalTime(remaining);
+      if(remaining===0)handleMentalTimeout(active);
+    };
+    tick();const timer=setInterval(tick,100);
+    return ()=>clearInterval(timer);
+  },[screen,mode,index,checked]);
+
   useEffect(() => {
     if(screen!=='shark'||sharkOutcome!==null)return undefined;
     // Deadline thực thay vì trừ 1 giây mỗi tick (tránh đồng hồ chạy chậm khi tab nền).
@@ -656,18 +674,57 @@ export default function App() {
   const gameStars = (count, total) => count / total >= .9 ? 3 : count / total >= .75 ? 2 : count / total >= .6 ? 1 : 0;
 
   function checkAnswer() {
-    if (!q || !normalize(input) || checked) return;
+    if (!q || !normalize(input) || checked || (mode==='mental'&&mentalResolving.current)) return;
+    if(mode==='mental'&&Date.now()>=mentalDeadline.current){handleMentalTimeout(index);return;}
+    if(mode==='mental')mentalResolving.current=true;
     Keyboard.dismiss(); setChecked(true);
     const right = normalize(input) === String(q.answer);
     if (right) setCorrectCount(c => c + 1);
     setAnswers(old => [...old, { id: q.id, topic: q.topic, level: q.level, question: q.question, answer: q.answer, userAnswer: input.trim(), correct: right, explanation: q.explanation, hintUsed: hintLevel }]);
   }
 
+  async function finishMental(finalAnswers,finalCorrect){
+    const requested=mentalStarDelta(finalCorrect,questions.length);
+    const applied=applyMentalStars(progress,requested);
+    const stars=applied.delta;
+    const record={id:`mental-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
+      date:new Date().toISOString(),mode:'mental',topic:mentalOperation==='multiply'?'multiply':mentalOperation==='divide'?'divide':'mixed',
+      level:'5 giây/câu',total:questions.length,correct:finalCorrect,
+      score:Math.round(finalCorrect/questions.length*100)/10,
+      seconds:Math.round((Date.now()-startedAt)/1000),stars,requestedStars:requested,answers:finalAnswers};
+    await save({...applied.progress,history:[record,...progress.history],
+      badges:Array.from(new Set([...(progress.badges||[]),...(finalCorrect===questions.length?['Hoàn hảo']:[])]))});
+    setSessionDone(record);setScreen('result');
+  }
+
+  function handleMentalTimeout(expectedIndex){
+    if(mode!=='mental'||screen!=='quiz'||checked||mentalResolving.current
+      ||mentalQuestionRef.current!==expectedIndex)return;
+    const item=questions[expectedIndex];if(!item)return;
+    mentalResolving.current=true;Keyboard.dismiss();
+    const rows=[...answers,{id:item.id,topic:item.topic,level:item.level,question:item.question,
+      answer:item.answer,userAnswer:'Hết giờ',correct:false,timeout:true,
+      explanation:item.explanation,hintUsed:0}];
+    setAnswers(rows);setMentalTime(0);
+    if(expectedIndex+1>=questions.length){finishMental(rows,correctCount);return;}
+    mentalQuestionRef.current=expectedIndex+1;
+    mentalDeadline.current=Date.now()+SECONDS_PER_QUESTION*1000;
+    setMentalTime(SECONDS_PER_QUESTION);setInput('');setChecked(false);setHintLevel(0);
+    setIndex(expectedIndex+1);mentalResolving.current=false;
+  }
+
   async function nextQuestion() {
     if (index + 1 < questions.length) {
+      if(mode==='mental'){
+        mentalQuestionRef.current=index+1;
+        mentalDeadline.current=Date.now()+SECONDS_PER_QUESTION*1000;
+        setMentalTime(SECONDS_PER_QUESTION);
+        mentalResolving.current=false;
+      }
       setIndex(index + 1); setInput(''); setChecked(false); setHintLevel(0); return;
     }
-    const stars = ['game','bank','mental'].includes(mode) ? gameStars(correctCount, questions.length) : 0;
+    if(mode==='mental'){mentalResolving.current=true;await finishMental(answers,correctCount);return;}
+    const stars = ['game','bank'].includes(mode) ? gameStars(correctCount, questions.length) : 0;
     const record = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       date: new Date().toISOString(), mode, topic, level, total: questions.length,
@@ -682,8 +739,12 @@ export default function App() {
   }
 
   function beginMental(){
-    const picked=generateMentalSet({operation:mentalOperation,digits:mentalDigits,count:mentalCount,seed:Date.now()});
-    setMode('mental');setTopic(picked[0].topic);setLevel(mentalDigits===1?'Cơ bản':mentalDigits===2?'Khá':'Nâng cao');
+    const picked=generateMentalSet({operation:mentalOperation,multiplierDigits:mentalMultiplierDigits,
+      dividendDigits:mentalDividendDigits,count:mentalCount,seed:Date.now()});
+    mentalQuestionRef.current=0;mentalResolving.current=false;
+    mentalDeadline.current=Date.now()+SECONDS_PER_QUESTION*1000;
+    setMentalTime(SECONDS_PER_QUESTION);
+    setMode('mental');setTopic(picked[0].topic);setLevel('5 giây/câu');
     setQuestions(picked);setIndex(0);setInput('');setChecked(false);setCorrectCount(0);
     setAnswers([]);setStartedAt(Date.now());setSessionDone(null);setHintLevel(0);setScreen('quiz');
   }
