@@ -128,7 +128,7 @@ export const EXERCISE_BANK = Object.freeze(BANK_GROUPS.flatMap(group=>
 export function groupStats(history=[]){
   const rows=(Array.isArray(history)?history:[]).flatMap(h=>h.answers||[]);
   return BANK_GROUPS.map(group=>({
-    ...group,done:new Set(rows.filter(a=>a?.id?.startsWith('mk83-'+group.id+'-')).map(a=>a.id)).size
+    ...group,done:new Set(rows.filter(a=>a?.correct===true&&a?.id?.startsWith('mk83-'+group.id+'-')).map(a=>a.id)).size
   }));
 }
 export function chooseExercises(groupId,level='Tất cả',count=10,history=[]){
