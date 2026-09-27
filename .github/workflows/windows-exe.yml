@@ -1,8 +1,9 @@
-name: Build MathKid V8.2 Windows EXE (internal test)
+name: Build MathKid V8.3 Windows EXE (internal test)
 on:
   push:
     branches:
       - feature/v8.2-windows-exe
+      - feature/v8.3-exercise-bank
     paths:
       - 'App.js'
       - 'Curriculum.js'
@@ -11,6 +12,7 @@ on:
       - 'ProgressStorage.js'
       - 'Navigation.js'
       - 'StarShop.js'
+      - 'ExerciseBank.js'
       - 'desktop/**'
       - 'tests/**'
       - 'package.json'
@@ -47,7 +49,7 @@ jobs:
       - name: Upload executable
         uses: actions/upload-artifact@v4
         with:
-          name: MathKid4-V8.2-Windows-EXE
+          name: MathKid4-V8.3-Windows-EXE
           path: dist-desktop/*.exe
           if-no-files-found: error
           retention-days: 14

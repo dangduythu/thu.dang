@@ -6,6 +6,8 @@ const {STAR_REWARDS,availableStars,purchaseReward,equipReward}=await importPure(
 const {normalizeProgress,makeBackup,parseBackup,PROGRESS_KEY}=await importPure('ProgressStorage.js');
 assert.equal(backDestination('home'),null);
 assert.equal(backDestination('shop'),'home');
+assert.equal(backDestination('bank'),'home');
+assert.equal(backDestination('quiz','bank'),'bank');
 assert.equal(backDestination('curriculumLesson'),'curriculum');
 assert.equal(backDestination('quiz','test'),'testChoose');
 assert.equal(backDestination('quiz','game'),'gameChoose');

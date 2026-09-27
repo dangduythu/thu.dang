@@ -2,18 +2,18 @@
   "expo": {
     "name": "MathKid 4 Pro",
     "slug": "mathkid4-pro",
-    "version": "8.2.0",
+    "version": "8.3.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "android": {
       "package": "com.dangduythu.mathkid4pro",
-      "versionCode": 2
+      "versionCode": 3
     },
     "updates": {
       "enabled": false
     },
     "extra": {
-      "note": "V8.2 Windows desktop RC. Windows and Android progress transfer is manual via JSON backup."
+      "note": "V8.3 preview: offline 1000-question templated bank; existing phone/PC data preserved by JSON migration."
     },
     "web": {
       "bundler": "metro",
