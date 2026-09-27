@@ -13,7 +13,7 @@ import {PROGRESS_KEY, PRE_RESTORE_KEY, normalizeProgress, makeBackup, parseBacku
 import {backDestination} from './Navigation';
 import {STAR_REWARDS, availableStars, getReward, purchaseReward, equipReward} from './StarShop';
 import {EXERCISE_BANK, BANK_GROUPS, chooseExercises, groupStats} from './ExerciseBank';
-import {MENTAL_OPERATIONS, FACTOR_DIGITS, generateMentalSet} from './MentalMath';
+import {MENTAL_OPERATIONS, FACTOR_DIGITS, DIVIDEND_DIGITS, MENTAL_COUNTS, SECONDS_PER_QUESTION, generateMentalSet, mentalStarDelta, applyMentalStars} from './MentalMath';
 import {REAL_REWARDS, remainingStars, redeemRealReward, markRewardDelivered} from './RealRewards';
 
 const SAVE_KEY = PROGRESS_KEY; // Giữ chính xác khóa V5–V7.5 để đọc lịch sử cũ.
@@ -26,7 +26,7 @@ const BOOKS = [
 // Bản alpha: lựa chọn bộ sách là tùy chọn hồ sơ, CHƯA phải ma trận đề được duyệt theo SGK.
 
 const GREEN = '#168451';
-const APP_VERSION = 'V8.4 Preview · Tính nhẩm & Đổi sao';
+const APP_VERSION = 'V8.4.1 Preview · Thử thách 5 giây';
 const desktopBridge = () => Platform.OS==='web' && typeof window!=='undefined' ? window.mathkidDesktop : null;
 const TOPICS = [
   { id: 'numbers', title: 'Số tự nhiên', icon: '🔢', color: '#e6f4ea', description: 'Hàng, lớp, so sánh và làm tròn số', lessons: [
@@ -527,8 +527,14 @@ export default function App() {
   const [shopMessage,setShopMessage] = useState('');
   const [rewardToConfirm,setRewardToConfirm]=useState(null);
   const [mentalOperation,setMentalOperation]=useState('mixed');
-  const [mentalDigits,setMentalDigits]=useState(1);
-  const [mentalCount,setMentalCount]=useState(10);
+  const [mentalMultiplierDigits,setMentalMultiplierDigits]=useState(1);
+  const [mentalDividendDigits,setMentalDividendDigits]=useState(2);
+  const [mentalCount,setMentalCount]=useState(50);
+  const [mentalTime,setMentalTime]=useState(SECONDS_PER_QUESTION);
+  const mentalDeadline=useRef(0);
+  const mentalQuestionRef=useRef(-1);
+  const mentalResolving=useRef(false);
+  const mentalFinished=useRef(false);
   const [bankGroup,setBankGroup] = useState('all');
   const [bankLevel,setBankLevel] = useState('Tất cả');
   const [bankCount,setBankCount] = useState(10);
@@ -593,6 +599,19 @@ export default function App() {
     return ()=>listener.remove();
   },[screen,mode]);
 
+  useEffect(()=>{
+    if(screen!=='quiz'||mode!=='mental'||checked)return undefined;
+    const active=index;
+    const tick=()=>{
+      if(mentalQuestionRef.current!==active||mentalResolving.current)return;
+      const remaining=Math.max(0,Math.ceil((mentalDeadline.current-Date.now())/1000));
+      setMentalTime(remaining);
+      if(remaining===0)handleMentalTimeout(active);
+    };
+    tick();const timer=setInterval(tick,100);
+    return ()=>clearInterval(timer);
+  },[screen,mode,index,checked]);
+
   useEffect(() => {
     if(screen!=='shark'||sharkOutcome!==null)return undefined;
     // Deadline thực thay vì trừ 1 giây mỗi tick (tránh đồng hồ chạy chậm khi tab nền).
@@ -656,18 +675,59 @@ export default function App() {
   const gameStars = (count, total) => count / total >= .9 ? 3 : count / total >= .75 ? 2 : count / total >= .6 ? 1 : 0;
 
   function checkAnswer() {
-    if (!q || !normalize(input) || checked) return;
+    if (!q || !normalize(input) || checked || (mode==='mental'&&mentalResolving.current)) return;
+    if(mode==='mental'&&Date.now()>=mentalDeadline.current){handleMentalTimeout(index);return;}
+    if(mode==='mental')mentalResolving.current=true;
     Keyboard.dismiss(); setChecked(true);
     const right = normalize(input) === String(q.answer);
     if (right) setCorrectCount(c => c + 1);
     setAnswers(old => [...old, { id: q.id, topic: q.topic, level: q.level, question: q.question, answer: q.answer, userAnswer: input.trim(), correct: right, explanation: q.explanation, hintUsed: hintLevel }]);
   }
 
+  async function finishMental(finalAnswers,finalCorrect){
+    if(mentalFinished.current)return;
+    mentalFinished.current=true;
+    const requested=mentalStarDelta(finalCorrect,questions.length);
+    const applied=applyMentalStars(progress,requested);
+    const stars=applied.delta;
+    const record={id:`mental-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
+      date:new Date().toISOString(),mode:'mental',topic:mentalOperation==='multiply'?'multiply':mentalOperation==='divide'?'divide':'mixed',
+      level:'5 giây/câu',total:questions.length,correct:finalCorrect,
+      score:Math.round(finalCorrect/questions.length*100)/10,
+      seconds:Math.round((Date.now()-startedAt)/1000),stars,requestedStars:requested,answers:finalAnswers};
+    await save({...applied.progress,history:[record,...progress.history],
+      badges:Array.from(new Set([...(progress.badges||[]),...(finalCorrect===questions.length?['Hoàn hảo']:[])]))});
+    setSessionDone(record);setScreen('result');
+  }
+
+  function handleMentalTimeout(expectedIndex){
+    if(mode!=='mental'||screen!=='quiz'||checked||mentalResolving.current
+      ||mentalQuestionRef.current!==expectedIndex)return;
+    const item=questions[expectedIndex];if(!item)return;
+    mentalResolving.current=true;Keyboard.dismiss();
+    const rows=[...answers,{id:item.id,topic:item.topic,level:item.level,question:item.question,
+      answer:item.answer,userAnswer:'Hết giờ',correct:false,timeout:true,
+      explanation:item.explanation,hintUsed:0}];
+    setAnswers(rows);setMentalTime(0);
+    if(expectedIndex+1>=questions.length){finishMental(rows,correctCount);return;}
+    mentalQuestionRef.current=expectedIndex+1;
+    mentalDeadline.current=Date.now()+SECONDS_PER_QUESTION*1000;
+    setMentalTime(SECONDS_PER_QUESTION);setInput('');setChecked(false);setHintLevel(0);
+    setIndex(expectedIndex+1);mentalResolving.current=false;
+  }
+
   async function nextQuestion() {
     if (index + 1 < questions.length) {
+      if(mode==='mental'){
+        mentalQuestionRef.current=index+1;
+        mentalDeadline.current=Date.now()+SECONDS_PER_QUESTION*1000;
+        setMentalTime(SECONDS_PER_QUESTION);
+        mentalResolving.current=false;
+      }
       setIndex(index + 1); setInput(''); setChecked(false); setHintLevel(0); return;
     }
-    const stars = ['game','bank','mental'].includes(mode) ? gameStars(correctCount, questions.length) : 0;
+    if(mode==='mental'){mentalResolving.current=true;await finishMental(answers,correctCount);return;}
+    const stars = ['game','bank'].includes(mode) ? gameStars(correctCount, questions.length) : 0;
     const record = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       date: new Date().toISOString(), mode, topic, level, total: questions.length,
@@ -682,8 +742,12 @@ export default function App() {
   }
 
   function beginMental(){
-    const picked=generateMentalSet({operation:mentalOperation,digits:mentalDigits,count:mentalCount,seed:Date.now()});
-    setMode('mental');setTopic(picked[0].topic);setLevel(mentalDigits===1?'Cơ bản':mentalDigits===2?'Khá':'Nâng cao');
+    const picked=generateMentalSet({operation:mentalOperation,multiplierDigits:mentalMultiplierDigits,
+      dividendDigits:mentalDividendDigits,count:mentalCount,seed:Date.now()});
+    mentalQuestionRef.current=0;mentalResolving.current=false;mentalFinished.current=false;
+    mentalDeadline.current=Date.now()+SECONDS_PER_QUESTION*1000;
+    setMentalTime(SECONDS_PER_QUESTION);
+    setMode('mental');setTopic(picked[0].topic);setLevel('5 giây/câu');
     setQuestions(picked);setIndex(0);setInput('');setChecked(false);setCorrectCount(0);
     setAnswers([]);setStartedAt(Date.now());setSessionDone(null);setHintLevel(0);setScreen('quiz');
   }
@@ -899,10 +963,11 @@ export default function App() {
   }
   if(ready && screen==='quiz' && q){
     return <CompactShell title={mode==='game'?'Vượt ải':mode==='test'?'Kiểm tra':mode==='review'?'Ôn câu từng sai':mode==='bank'?'Kho 1.000 bài':mode==='mental'?'Luyện tính nhẩm':'Luyện tập'} onBack={()=>setScreen('home')} onHome={()=>setScreen('home')}
-      meta={<Text style={styles.progressText}>{index+1}/{questions.length}</Text>}
+      meta={<Text style={styles.progressText}>{mode==='mental'?'⏱ '+mentalTime+'s · ':''}{index+1}/{questions.length}</Text>}
       actionLabel={!checked?(mode==='test'?'Ghi nhận câu trả lời':'Kiểm tra đáp án'):(index+1===questions.length?'Xem kết quả →':'Câu tiếp theo →')}
       actionDisabled={!checked&&!normalize(input)} onAction={checked?nextQuestion:checkAnswer}>
       <View style={styles.rowBetween}><Text style={styles.muted}>{mode==='test'&&examKind!=='topic'?'Đề tổng hợp':mode==='bank'?(BANK_GROUPS.find(g=>g.id===q.groupId)?.title||currentTopic.title):mode==='mental'?'Nhân và chia nhiều chữ số':currentTopic.title} · {mode==='bank'?q.level:level}</Text><Text style={styles.progressText}>Câu {index+1}/{questions.length}</Text></View>
+      {mode==='mental'&&<View style={[styles.card,{padding:9,backgroundColor:mentalTime<=2?'#fff0e8':'#e8f5ee'}]}><Text style={[styles.rowTitle,{textAlign:'center',color:mentalTime<=2?'#b13a27':'#176b4b'}]}>⏱ Còn {mentalTime} giây · Hết giờ tự chuyển câu tiếp theo</Text></View>}
       <View style={[styles.progressTrack,{marginVertical:0}]}><View style={[styles.progressFill,{width:`${(index+1)/questions.length*100}%`}]} /></View>
       <View style={[compactStyles.compactCard,q.visual&&{flexGrow:1,justifyContent:'space-around'}]}><Text style={compactStyles.smallLabel}>TÍNH VÀ ĐIỀN ĐÁP ÁN</Text><Text style={compactStyles.qText}>{q.question}</Text>
         <MathIllustration question={q} height={illustrationHeight}/>
@@ -953,15 +1018,23 @@ export default function App() {
     </>}
 
     {screen === 'mental' && <>{header('Luyện tính nhẩm')}
-      <Text style={styles.section}>Nhân và chia số có nhiều chữ số</Text>
-      <Text style={styles.muted}>Chọn phép tính và số chữ số của thừa số/số chia. Phép chia luôn chia hết. Có lời giải để con luyện cách tách số và kiểm tra bằng phép nhân.</Text>
-      <Text style={styles.section}>Phép tính</Text>
+      <Text style={styles.section}>Thử thách nhân và chia 5 giây/câu</Text>
+      <Text style={styles.muted}>Mỗi câu có 5 giây. Hết giờ được tính sai và tự chuyển sang câu kế tiếp. Bài chia luôn chia hết với số chia từ 2 đến 9.</Text>
+      <Text style={styles.section}>Chọn phép tính</Text>
       {MENTAL_OPERATIONS.map(op=><Pressable key={op.id} style={[styles.choice,mentalOperation===op.id&&styles.choiceActive]} onPress={()=>setMentalOperation(op.id)}><Text style={styles.choiceText}>{op.label}</Text><Text>{mentalOperation===op.id?'✅':'○'}</Text></Pressable>)}
-      <Text style={styles.section}>Số chữ số của thừa số / số chia</Text>
-      <View style={styles.levelRow}>{FACTOR_DIGITS.map(d=><Pressable key={d} style={[styles.levelButton,mentalDigits===d&&styles.levelActive]} onPress={()=>setMentalDigits(d)}><Text style={[styles.levelText,mentalDigits===d&&{color:'#fff'}]}>{d} chữ số</Text></Pressable>)}</View>
-      <Text style={styles.section}>Số câu mỗi lượt</Text>
-      <View style={styles.levelRow}>{[10,20].map(n=><Pressable key={n} style={[styles.levelButton,mentalCount===n&&styles.levelActive]} onPress={()=>setMentalCount(n)}><Text style={[styles.levelText,mentalCount===n&&{color:'#fff'}]}>{n} câu</Text></Pressable>)}</View>
-      <Button onPress={beginMental}>Bắt đầu luyện tập →</Button>
+      <Text style={styles.section}>Số chữ số của số nhân</Text>
+      <View style={styles.levelRow}>{FACTOR_DIGITS.map(d=><Pressable key={d} style={[styles.levelButton,mentalMultiplierDigits===d&&styles.levelActive]} onPress={()=>setMentalMultiplierDigits(d)}><Text style={[styles.levelText,mentalMultiplierDigits===d&&{color:'#fff'}]}>{d} chữ số</Text></Pressable>)}</View>
+      <Text style={styles.muted}>Số nhân là thừa số thứ hai trong phép nhân, có thể chọn 1, 2 hoặc 3 chữ số.</Text>
+      <Text style={styles.section}>Số chữ số của số bị chia</Text>
+      <View style={styles.levelRow}>{DIVIDEND_DIGITS.map(d=><Pressable key={d} style={[styles.levelButton,mentalDividendDigits===d&&styles.levelActive]} onPress={()=>setMentalDividendDigits(d)}><Text style={[styles.levelText,mentalDividendDigits===d&&{color:'#fff'}]}>{d} chữ số</Text></Pressable>)}</View>
+      <Text style={styles.muted}>Chọn số bị chia 2 hoặc 3 chữ số. Ở bài nhân, đây cũng là số chữ số của thừa số thứ nhất.</Text>
+      <Text style={styles.section}>Số phép tính trong một lượt</Text>
+      <View style={styles.levelRow}>{MENTAL_COUNTS.map(n=><Pressable key={n} style={[styles.levelButton,mentalCount===n&&styles.levelActive]} onPress={()=>setMentalCount(n)}><Text style={[styles.levelText,mentalCount===n&&{color:'#fff'}]}>{n} phép tính</Text></Pressable>)}</View>
+      <View style={styles.card}><Text style={styles.rowTitle}>⭐ Quy tắc sao riêng cho tính nhẩm</Text>
+        <Text style={styles.paragraph}>Đúng 100%: +10 sao · Trên 80%: +3 sao · Từ 50% đến 80%: +1 sao · Dưới 50%: trừ tối đa 3 sao.</Text>
+        <Text style={styles.muted}>Số sao còn dùng không bị âm; phần thưởng đã đổi không bị thu hồi.</Text>
+      </View>
+      <Button onPress={beginMental}>Bắt đầu {mentalCount} câu · 5 giây/câu →</Button>
     </>}
     {screen === 'bank' && <>{header('Kho 1.000 bài tập')}
       <Text style={styles.section}>9 nhóm kiến thức · 1.000 bài có lời giải</Text>
@@ -1121,7 +1194,7 @@ export default function App() {
 
     {screen === 'quiz' && q && <>{header(mode === 'game' ? '🎮 Vượt ải' : mode === 'test' ? '🏆 Kiểm tra' : '✏️ Luyện tập', 'home')}<View style={styles.rowBetween}><Text style={styles.muted}>{mode==='test'&&examKind!=='topic'?'Đề tổng hợp':mode==='bank'?(BANK_GROUPS.find(g=>g.id===q.groupId)?.title||currentTopic.title):mode==='mental'?'Nhân và chia nhiều chữ số':currentTopic.title} · {mode==='bank'?q.level:level}</Text><Text style={styles.progressText}>Câu {index + 1}/{questions.length}</Text></View><View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${(index + 1) / questions.length * 100}%` }]} /></View><View style={styles.questionCard}><Text style={styles.questionLabel}>TÍNH VÀ ĐIỀN ĐÁP ÁN</Text><Text style={styles.question}>{q.question}</Text><MathIllustration question={q} height={illustrationHeight}/><TextInput style={[styles.answerInput, checked && { borderColor: isCorrect ? GREEN : '#d14b4b' }]} placeholder="Nhập đáp án" placeholderTextColor="#91a09a" keyboardType="number-pad" value={input} onChangeText={setInput} editable={!checked} returnKeyType="done" onSubmitEditing={checkAnswer} accessibilityLabel="Đáp án của con" /><Text style={styles.muted}>Có thể nhập số có hoặc không có dấu cách.</Text></View>{checked && mode !== 'test' && <View style={[styles.feedback, { backgroundColor: isCorrect ? '#e6f4ea' : '#fff0ed' }]}><Text style={styles.feedbackTitle}>{isCorrect ? '🎉 Chính xác! Giỏi lắm!' : `💡 Đáp án đúng: ${formatNum(q.answer)}`}</Text><Text style={styles.paragraph}>{q.explanation}</Text></View>}{!checked && mode !== 'test' && <View style={styles.card}><Button secondary small onPress={() => setHintLevel(v => Math.min(3, v + 1))}>💡 Gợi ý {hintLevel}/3</Button>{hintLevel > 0 && <Text style={styles.paragraph}>{hintLevel === 1 ? 'Đọc kỹ đề bài: con cần tìm giá trị nào? Hãy nhớ quy tắc đã học trong chủ đề này.' : hintLevel === 2 ? 'Hãy viết phép tính ra giấy và kiểm tra từng bước trước khi điền đáp án.' : q.explanation}</Text>}</View>}{!checked ? <Button disabled={!normalize(input)} onPress={checkAnswer}>{mode === 'test' ? 'Ghi nhận câu trả lời' : 'Kiểm tra đáp án'}</Button> : <Button onPress={nextQuestion}>{index + 1 === questions.length ? 'Xem kết quả →' : 'Câu tiếp theo →'}</Button>}<Text style={styles.footnote}>Nếu con làm sai, hãy đọc lời giải trước khi tiếp tục.</Text></>}
 
-    {screen === 'result' && sessionDone && <>{header('Kết quả')}<Button secondary onPress={()=>setScreen('shop')}>🎁 Dùng sao đổi bạn đồng hành →</Button><View style={styles.resultCard}><Text style={styles.resultEmoji}>{sessionDone.correct / sessionDone.total >= .8 ? '🏆' : '🌈'}</Text><Text style={styles.section}>Con đã hoàn thành!</Text><Text style={styles.bigScore}>{sessionDone.score.toFixed(1).replace('.', ',')}/10</Text><Text style={styles.paragraph}>{sessionDone.correct}/{sessionDone.total} câu đúng</Text>{(mode === 'game'||mode==='bank'||mode==='mental'||mode==='mini'||mode==='shark'||mode==='drag') && <Text style={styles.heroStars}>+ {sessionDone.stars} ⭐</Text>}</View>{sessionDone.answers.filter(a => mode === 'test' || !a.correct).length > 0 && <><Text style={styles.section}>{mode === 'test' ? 'Đáp án và lời giải' : 'Câu cần ôn lại'}</Text>{sessionDone.answers.filter(a => mode === 'test' || !a.correct).map((a, i) => <View key={i} style={styles.card}><Text style={styles.rowTitle}>{a.question}</Text><Text style={styles.muted}>Con trả lời: {a.userAnswer} · Đúng: {formatNum(a.answer)} {a.correct ? '✅' : '❌'}</Text><Text style={styles.paragraph}>{a.explanation}</Text></View>)}</>}<Button onPress={() => mode==='mini'?beginMini():mode==='shark'?startShark():mode==='drag'?startMatch():mode==='review'?beginReview():mode==='bank'?beginBank():mode==='mental'?beginMental():begin(mode,topic,level)}>Làm lượt mới</Button><Button secondary onPress={() => setScreen('home')}>Về trang chủ</Button></>}
+    {screen === 'result' && sessionDone && <>{header('Kết quả')}<Button secondary onPress={()=>setScreen('shop')}>🎁 Dùng sao đổi bạn đồng hành →</Button><View style={styles.resultCard}><Text style={styles.resultEmoji}>{sessionDone.correct / sessionDone.total >= .8 ? '🏆' : '🌈'}</Text><Text style={styles.section}>Con đã hoàn thành!</Text><Text style={styles.bigScore}>{sessionDone.score.toFixed(1).replace('.', ',')}/10</Text><Text style={styles.paragraph}>{sessionDone.correct}/{sessionDone.total} câu đúng</Text>{(mode === 'game'||mode==='bank'||mode==='mental'||mode==='mini'||mode==='shark'||mode==='drag') && <Text style={styles.heroStars}>{sessionDone.stars>=0?'+ ':'− '}{Math.abs(sessionDone.stars)} ⭐</Text>}{mode==='mental'&&sessionDone.requestedStars<0&&sessionDone.stars!==sessionDone.requestedStars&&<Text style={styles.muted}>Chỉ trừ số sao còn có thể sử dụng; không ảnh hưởng quà đã đổi.</Text>}</View>{sessionDone.answers.filter(a => mode === 'test' || !a.correct).length > 0 && <><Text style={styles.section}>{mode === 'test' ? 'Đáp án và lời giải' : 'Câu cần ôn lại'}</Text>{sessionDone.answers.filter(a => mode === 'test' || !a.correct).map((a, i) => <View key={i} style={styles.card}><Text style={styles.rowTitle}>{a.question}</Text><Text style={styles.muted}>Con trả lời: {a.userAnswer} · Đúng: {formatNum(a.answer)} {a.correct ? '✅' : '❌'}</Text><Text style={styles.paragraph}>{a.explanation}</Text></View>)}</>}<Button onPress={() => mode==='mini'?beginMini():mode==='shark'?startShark():mode==='drag'?startMatch():mode==='review'?beginReview():mode==='bank'?beginBank():mode==='mental'?beginMental():begin(mode,topic,level)}>Làm lượt mới</Button><Button secondary onPress={() => setScreen('home')}>Về trang chủ</Button></>}
 
     {screen === 'history' && <>{header('Thành tích')}<View style={styles.stats}><View><Text style={styles.statNumber}>{progress.history.length}</Text><Text style={styles.muted}>Lượt học</Text></View><View><Text style={styles.statNumber}>{average}%</Text><Text style={styles.muted}>Tỷ lệ đúng</Text></View><View><Text style={styles.statNumber}>{progress.stars}</Text><Text style={styles.muted}>Ngôi sao</Text></View></View><Text style={styles.section}>Huy hiệu đã nhận</Text><Text style={styles.paragraph}>{(progress.badges||[]).length?(progress.badges||[]).map(b=>'🏅 '+b).join(' · '):'Hoàn thành các thử thách để nhận huy hiệu.'}</Text><Text style={styles.section}>Lịch sử gần đây</Text>{progress.history.length === 0 ? <Text style={styles.muted}>Chưa có kết quả. Hãy làm một lượt bài tập nhé!</Text> : progress.history.slice(0, 30).map(h => <Pressable key={h.id} style={styles.card} onPress={() => { setSessionDone(h); setScreen('pastResult'); }}><Text style={styles.rowTitle}>{TOPICS.find(t => t.id === h.topic)?.title || h.topic} · {h.level}</Text><Text style={styles.muted}>{new Date(h.date).toLocaleString('vi-VN')} · {(h.mode === 'game'||h.mode==='mini') ? 'Trò chơi' : h.mode === 'test' ? 'Kiểm tra' : h.mode==='shark'?'Vượt biển':h.mode==='drag'?'Kéo thả':h.mode==='steps'?'Toán nhiều bước':h.mode==='review'?'Ôn lỗi sai':h.mode==='mental'?'Tính nhẩm':'Luyện tập'}</Text><Text style={styles.progressText}>{h.correct}/{h.total} đúng · {h.score.toFixed(1).replace('.', ',')}/10</Text></Pressable>)}</>}
 

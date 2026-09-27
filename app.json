@@ -2,18 +2,18 @@
   "expo": {
     "name": "MathKid 4 Pro",
     "slug": "mathkid4-pro",
-    "version": "8.4.0",
+    "version": "8.4.1",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "android": {
       "package": "com.dangduythu.mathkid4pro",
-      "versionCode": 4
+      "versionCode": 5
     },
     "updates": {
       "enabled": false
     },
     "extra": {
-      "note": "V8.4: selectable multiplication/division 1-3 digit factor, repeatable parent-fulfilled star vouchers, existing progress migration."
+      "note": "V8.4.1: 5s/question, 50/100 mixed arithmetic, exact 2/3-digit dividends and threshold star rewards."
     },
     "web": {
       "bundler": "metro",
