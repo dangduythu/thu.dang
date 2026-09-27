@@ -16,7 +16,8 @@ export function normalizeProgress(raw) {
     lessonChecks:isObject(p.lessonChecks)?p.lessonChecks:{},
     book:typeof p.book==='string'?p.book:'general',
     starSpent:integer(p.starSpent), ownedRewards:list(p.ownedRewards).filter(id=>typeof id==='string'),
-    equippedReward:typeof p.equippedReward==='string'?p.equippedReward:null
+    equippedReward:typeof p.equippedReward==='string'?p.equippedReward:null,
+    redemptions:list(p.redemptions).filter(r=>isObject(r)&&typeof r.id==='string'&&typeof r.rewardId==='string')
   };
 }
 export function makeBackup(progress, book) {

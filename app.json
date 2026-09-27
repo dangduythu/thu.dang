@@ -2,18 +2,18 @@
   "expo": {
     "name": "MathKid 4 Pro",
     "slug": "mathkid4-pro",
-    "version": "8.3.0",
+    "version": "8.4.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "android": {
       "package": "com.dangduythu.mathkid4pro",
-      "versionCode": 3
+      "versionCode": 4
     },
     "updates": {
       "enabled": false
     },
     "extra": {
-      "note": "V8.3 preview: offline 1000-question templated bank; existing phone/PC data preserved by JSON migration."
+      "note": "V8.4: selectable multiplication/division 1-3 digit factor, repeatable parent-fulfilled star vouchers, existing progress migration."
     },
     "web": {
       "bundler": "metro",

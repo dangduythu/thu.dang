@@ -6,11 +6,11 @@ export function backDestination(screen, mode) {
     gameChoose:'map', map:'home', mini:'map', shark:'sharkChoose',
     sharkChoose:'home', dragGame:'home', wordSteps:'home', result:'home',
     history:'home', pastResult:'history', backup:'parent', parent:'home',
-    shop:'home', bank:'home', coach:'home', reviewPlan:'home', mistakes:'home', daily:'home',
+    shop:'home', mental:'home', bank:'home', coach:'home', reviewPlan:'home', mistakes:'home', daily:'home',
     book:'home', choose:'home', testChoose:'home'
   };
   if (screen === 'quiz') {
-    return mode === 'bank' ? 'bank' : mode === 'game' ? 'gameChoose' : mode === 'test' ? 'testChoose'
+    return mode === 'mental' ? 'mental' : mode === 'bank' ? 'bank' : mode === 'game' ? 'gameChoose' : mode === 'test' ? 'testChoose'
       : mode === 'review' ? 'reviewPlan' : 'choose';
   }
   return paths[screen] || 'home';

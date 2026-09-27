@@ -1,4 +1,4 @@
-name: Build MathKid V8.3 Android APK (internal test)
+name: Build MathKid V8.4 Android APK (internal test)
 run-name: 'MathKid V8.3 APK · 1000 bài tập · ${{ github.sha }}'
 on:
   push:
@@ -6,6 +6,7 @@ on:
       - feature/v8-android-offline-release-candidate
       - feature/v8.1-back-navigation-star-shop
       - feature/v8.3-exercise-bank
+      - feature/v8.4-mental-math-rewards
     paths:
       - 'App.js'
       - 'Curriculum.js'
@@ -15,6 +16,8 @@ on:
       - 'Navigation.js'
       - 'StarShop.js'
       - 'ExerciseBank.js'
+      - 'MentalMath.js'
+      - 'RealRewards.js'
       - 'tests/**'
       - 'package.json'
       - 'app.json'
@@ -55,7 +58,7 @@ jobs:
       - name: Publish APK as GitHub artifact
         uses: actions/upload-artifact@v4
         with:
-          name: MathKid4-V8.3-android-apk
+          name: MathKid4-V8.4-android-apk
           path: android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
           retention-days: 14
