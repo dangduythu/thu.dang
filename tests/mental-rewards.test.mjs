@@ -69,4 +69,4 @@ assert.equal(restored.redemptions.find(x=>x.id==='reward-unique-0001').status,'d
 assert.equal(restored.starSpent,260);
 assert.equal(restored.stars,260);
 assert.equal(restored.ownedRewards[0],'explorer');
-console.log('PASS: 9000 mental questions, timed sprint thresholds, repeatable vouchers, legacy data and JSON backup');
+console.log('PASS: 27000 mental questions, timed sprint thresholds, repeatable vouchers, legacy data and JSON backup');
