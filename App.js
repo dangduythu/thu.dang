@@ -534,6 +534,7 @@ export default function App() {
   const mentalDeadline=useRef(0);
   const mentalQuestionRef=useRef(-1);
   const mentalResolving=useRef(false);
+  const mentalFinished=useRef(false);
   const [bankGroup,setBankGroup] = useState('all');
   const [bankLevel,setBankLevel] = useState('Tất cả');
   const [bankCount,setBankCount] = useState(10);
@@ -684,6 +685,8 @@ export default function App() {
   }
 
   async function finishMental(finalAnswers,finalCorrect){
+    if(mentalFinished.current)return;
+    mentalFinished.current=true;
     const requested=mentalStarDelta(finalCorrect,questions.length);
     const applied=applyMentalStars(progress,requested);
     const stars=applied.delta;
@@ -741,7 +744,7 @@ export default function App() {
   function beginMental(){
     const picked=generateMentalSet({operation:mentalOperation,multiplierDigits:mentalMultiplierDigits,
       dividendDigits:mentalDividendDigits,count:mentalCount,seed:Date.now()});
-    mentalQuestionRef.current=0;mentalResolving.current=false;
+    mentalQuestionRef.current=0;mentalResolving.current=false;mentalFinished.current=false;
     mentalDeadline.current=Date.now()+SECONDS_PER_QUESTION*1000;
     setMentalTime(SECONDS_PER_QUESTION);
     setMode('mental');setTopic(picked[0].topic);setLevel('5 giây/câu');
